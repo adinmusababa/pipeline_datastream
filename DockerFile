@@ -1,0 +1,29 @@
+# Use Python base image
+FROM python:3.9-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy your application files
+COPY producer.py .
+COPY consumer.py .
+COPY dashboard_frontend.py .
+
+# Expose port for Streamlit
+EXPOSE 8501
+
+# Create a script to run all services
+COPY start_services.sh .
+RUN chmod +x start_services.sh
+
+# Command to run services
+CMD ["./start_services.sh"]
