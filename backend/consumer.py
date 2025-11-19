@@ -1,382 +1,323 @@
-# 16
-
-import logging
-import numpy as np
-from datetime import datetime
-import pika
-from scipy.cluster.hierarchy import linkage, fcluster
-from collections import deque
-from pymongo import MongoClient
-from river import metrics, cluster
-from sklearn.metrics import silhouette_score, davies_bouldin_score
-import time
 import json
-from datetime import timedelta
+import time
+import pika
+from datetime import datetime
+from collections import deque
+from river import cluster, metrics
+from scipy.cluster.hierarchy import linkage, fcluster
+import numpy as np
 import sys
 
+# Import custom modules
+sys.path.append('backend')
+from modelDB import DatabaseManager
+from modelEvaluasi import ClusterEvaluator
+from modelStorageFootprint import StorageTracker
+from modelLogging import setup_logging, get_logger
+
+# Setup logging
+setup_logging(level='INFO', log_file='logs/consumer.log')
+logger = get_logger(__name__)
 
 
-class modelConsumer:
+class ModelConsumer:
+    """
+    Main consumer class untuk online clustering
+    Modular design dengan separation of concerns
+    """
+    
     def __init__(self, queue='data_stream', host='localhost', buffer_size=1000):
         self.queue = queue
         self.host = host
-        self.buffer_size = deque(maxlen=buffer_size)
+        self.buffer_size = buffer_size
+        
+        # Components
+        self.db_manager = DatabaseManager("clustering_datastreaming")
+        self.evaluator = ClusterEvaluator(self.db_manager)
+        self.storage_tracker = StorageTracker(self.db_manager)
+        
+        # Model & data
         self.model = None
+        self.data_buffer = deque(maxlen=buffer_size)
         self.counter = 0
-        self.storage_tracking_interval = 1000
-
-        # monggoDB setup
-        self.mongo_client = MongoClient('mongodb://localhost:27017/')
-        self.db = self.mongo_client['data_points_db']
-
-        # setup index
-        self.setup_indexes()
-
-        # metrix evaluasi
         self.metric = metrics.rand.AdjustedRand()
-
-        # lanjutkan dari state terakhir jika ada
-        self.lanjutkan_dari_state_terakhir()
-
-        # inisialisasi model
-        self.init_model()
-
-        # logging
-        logging.info(f"inisialisasi consumer, memproses: {self.counter} message.")
-
-    # fungsi utama memproses setiap kali data diterima
-    def proses_data_consumer(self, message):
-        # pastikan data memiliki fitur yang sesuai untuk memroses
-        try:
-            # orriginal_id = message.get['metadata', {}].get['original_id']
-            orriginal_id = message.get('metadata', {}).get('original_id')
-
-            if orriginal_id is None:
-                logging.warning("Data point tanpa original_id, dilewati.")
-                return
-            features = message['features']
-            x = {f'x{i}': val for i, val in enumerate(features)
-                 }
-            # model OML update
-            self.model.learn_one(x)
-            cluster_id = self.model.predict_one(x)
-            # add to buffer
-            self.buffer_size.append((features, cluster_id))
-
-            self.counter += 1
-
-            # # simpan ke database setiap interval tertentu
-            # metadata = message.get('metadata', {})
-            # raw_data = message.get('raw_data', {})
-
-            # self.db.clusters.insert_one({
-            #     "features": features,
-            #     "raw_data": raw_data,
-            #     # "cluster_id": int(cluster_id),
-            #     "cluster_id": int(cluster_id) if cluster_id is not None and not np.isnan(cluster_id) else -1,
-            #     "timestamp": datetime.utcnow(),
-            #     "User ID": metadata.get('User ID'),
-            #     "Item ID": metadata.get('Item ID'),
-            #     "Category ID": metadata.get('Category ID'),
-            #     "Behavior type": metadata.get('behavior_type'),
-            #     "original_id": orriginal_id
-            # })
-            
-            # evaluasi secara periodik
-            if self.counter % 100 == 0:
-                self.evaluasi_cluster()
-                self.gabung_cluster_HAC()
-                self.track_storage_footprint()
-                self.save_state()  # Save checkpoint
-                logging.info(f"Checkpoint saved at {self.counter} messages")
-
-            if self.counter % 100 == 0:
-                logging.info(f"Processed: {self.counter} | Cluster: {cluster_id} | Buffer: {len(self.buffer_size)}")
-
-        except Exception as e:
-            logging.error(f"Error processing datapoint: {e}")
+        
+        # Restore state
+        self.restore_full_state()
+        
+        logger.info(f" ModelConsumer initialized | Processed: {self.counter} messages")
     
-    # muat dan inisialisasi model
-    def init_model(self):
+    def restore_full_state(self):
+        """Restore consumer state dari database"""
+        state = self.db_manager.restore_consumer_state()
+        
+        if state:
+            self.counter = state.get("processed_count", 0)
+            
+            # Restore model
+            model = self.db_manager.restore_model_snapshot()
+            if model:
+                self.model = model
+                logger.info(" Full model state restored from snapshot")
+            else:
+                logger.warning(" No model snapshot, initializing fresh")
+                self.load_or_initialize_model()
+            
+            # Restore buffer
+            buffer_data = self.db_manager.restore_buffer_data(self.buffer_size)
+            for item in buffer_data:
+                self.data_buffer.append(item)
+            
+            logger.info(f" State restored: {self.counter} processed, {len(self.data_buffer)} in buffer")
+        else:
+            logger.info("Starting fresh")
+            self.load_or_initialize_model()
+    
+    def save_full_state(self):
+        """Save consumer state ke database"""
+        # Save model snapshot
+        self.db_manager.save_model_snapshot(self.model, self.counter)
+        
+        # Save consumer state
+        model_params = {
+            "clustering_threshold": self.model.clustering_threshold,
+            "fading_factor": self.model.fading_factor
+        }
+        self.db_manager.save_consumer_state(
+            self.counter, 
+            len(self.data_buffer), 
+            model_params
+        )
+    
+    def load_or_initialize_model(self):
+        """Initialize DBSTREAM model"""
+        params = self.db_manager.get_model_params()
+        
         self.model = cluster.DBSTREAM(
-            fading_factor=0.001,
-            clustering_threshold=0.5,
-            cleanup_interval=2,
-            intersection_factor=0.5,
+            clustering_threshold=params["clustering_threshold"],
+            fading_factor=params["fading_factor"],
+            cleanup_interval=50,
+            intersection_factor=0.3,
             minimum_weight=1.0
         )
-        logging.info("Model DBSTREAM diinisialisasi.")
 
-    # fungsi evaluassi Silhouette dan Adjusted Rand Index
-    def evaluasi_cluster(self):
-        if len(self.buffer_size) < 5:
-            return
-        
-        # features = np.array([f[:3] for f, _, _ in self.buffer_size]) 
-        # labels = np.array([cid for _, cid, _ in self.buffer_size])
-        features = np.array([f for f, _ in self.buffer_size])
-        labels = np.array([cid for _, cid in self.buffer_size])
-        
-        unique_clusters = np.unique(labels)
-        # unique_clusters = set(labels)
+    
+    def process_datapoint(self, message):
+        """Process satu data point dari queue"""
+        try:
+            original_id = message.get('metadata', {}).get('original_id')
 
-        if len(unique_clusters) < 2: 
-            return 
+            # Skip duplicates (idempotency)
+            if original_id and self.db_manager.is_data_processed(original_id):
+                logger.debug(f"Skipping duplicate: {original_id}")
+                return
+            
+            # Extract features
+            features = message['features']
+            x = {f'x{i}': val for i, val in enumerate(features)}
 
-        try: # Menghitung metrik silhouette dan Davies-Bouldin Index
-            silhouette = silhouette_score(features, labels) 
-            db_index = davies_bouldin_score(features, labels)
-        except Exception:
-            silhouette, db_index = -1, -1
+            # Learn & predict
+            self.model.learn_one(x)
+            cluster_id = self.model.predict_one(x)
 
-        dunn = self.compute_index_dunn(features, labels) # Menghitung indeks Dunn untuk mengevaluasi pemisahan dan kepadatan klaster
-        intra, inter = self.jarak_cluster(features, labels) # Menghitung jarak intra-klaster dan inter-klaster
+            if cluster_id is None:
+                cluster_id = 0
+                logger.warning("Cluster ID was None, assigned to 0")
 
-        self.db.metrics.replace_one(
-            {"_id": "latest"},
-            {
-                "_id": "latest",
-                "total_data": self.counter,
-                "active_clusters": len(unique_clusters),
-                "silhouette": float(silhouette),
-                "davies_bouldin": float(db_index),
-                "dunn_index": float(dunn),
-                "intra_distance": float(intra),
-                "inter_distance": float(inter),
-                "timestamp": datetime.utcnow()
-            },
-            upsert=True
+            # Add to buffer
+            true_label = message.get("label", None)
+            self.data_buffer.append((features, cluster_id, true_label))
+            self.counter += 1
+
+            # Save to database
+            metadata = message.get('metadata', {})
+            raw_data = message.get('raw_data', {})
+            
+            cluster_data = {
+                "features": features,
+                "raw_data": raw_data,
+                "cluster_id": int(cluster_id),
+                "true_label": true_label,
+                "timestamp": datetime.utcnow(),
+                "User ID": metadata.get('User ID'),
+                "Item ID": metadata.get('Item ID'),
+                "Category ID": metadata.get('Category ID'),
+                "Behavior type": metadata.get('behavior_type'),
+                "original_id": original_id,
+                "processing_counter": self.counter
+            }
+            
+            self.db_manager.save_cluster_data(cluster_data)
+
+            # Periodic operations (every 100 messages)
+            if self.counter % 100 == 0:
+                self._periodic_operations()
+
+        except Exception as e:
+            logger.error(f"Error processing datapoint: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def _periodic_operations(self):
+        """Operasi periodik: evaluate, merge, track, save"""
+        # 1. Evaluate SEBELUM merge (memory only)
+        self.evaluator.pre_merge_metrics = self.evaluator.evaluate_internal_metrics(
+            self.data_buffer, 
+            self.counter, 
+            self.model,
+            save_to_db=False,
+            label_suffix="pre_merge"
         )
-
-        self.db.metrics_archive.insert_one({
-            "timestamp": datetime.utcnow(),
-            "silhouette": float(silhouette),
-            "davies_bouldin": float(db_index),
-            "dunn_index": float(dunn),
-            "intra_distance": float(intra),
-            "inter_distance": float(inter),
-            "total_data": self.counter,
-            "active_clusters": len(unique_clusters),
-            "clustering_threshold": getattr(self.model, "clustering_threshold", None),
-            "fading_factor": getattr(self.model, "fading_factor", None)
-        })
         
-        logging.info(f"Metrics | Silhouette: {silhouette:.3f} | DBI: {db_index:.3f} | Dunn: {dunn:.3f}")
-
-    # fungsi HAC untuk menggabungkan cluster yang mirip
-    def gabung_cluster_HAC(self, threshold=0.7):
-        # features = np.array([f[:3] for f, _, _ in self.buffer_size]) 
-        # labels = np.array([cid for _, cid, _ in self.buffer_size])
-        features = np.array([f for f, _ in self.buffer_size])
-        labels = np.array([cid for _, cid in self.buffer_size])
-        unique_clusters = np.unique(labels)
-
-        if len(self.buffer_size) < 5: 
-            return
+        # 2. Merge clusters
+        merge_happened = self.merge_similar_clusters()
         
-        # hitung centroid setiap cluster yang diurutkan berdasarkan unique cluster
-        centroids = np.array([np.mean(features[labels == cid], axis=0) for cid in unique_clusters])
-        if len(centroids) < 2:
-            return
-        
-        # terapkan HAC pada centroid
-        hac =  linkage(centroids, method='average', metric='cosine')
-
-        cluster_groups = fcluster(hac, threshold, criterion='distance')
-
-        # peta cluster lama ke cluster baru
-        cluster_map = {}
-        for grp in np.unique(cluster_groups):
-            anggota = unique_clusters[cluster_groups == grp]
-            rep = int(np.min(anggota))
-
-            for m in anggota:
-                if m != rep:
-                    cluster_map[int(m)] = rep
-
-        if not cluster_map:
-            return
-        
-        new_buffer = deque(maxlen=self.buffer_size)
-        for features, cid, true_label in self.buffer_size:
-            new_cid = cluster_map.get(cid, cid)
-            new_buffer.append((features, new_cid, true_label))
-        self.buffer_size = new_buffer
-
-        # update database
-        waktu_proses = datetime.utcnow()
-        for old_cid, new_cid, in cluster_map.items():
-            self.db.clusters.update_many(
-                {"cluster_id": old_cid},
-                {
-                    "$set": {
-                        "cluster_id": new_cid,
-                        "merged_at": waktu_proses
-                    }
-                }
+        # 3. Evaluate SETELAH merge (save to DB)
+        if merge_happened:
+            self.evaluator.evaluate_internal_metrics(
+                self.data_buffer,
+                self.counter,
+                self.model,
+                save_to_db=True,
+                label_suffix="post_merge"
             )
-
-            # simpan riwayat penggabungan
-            self.db.cluster_merges.insert_one({
-                "old_cluster_id": int(old_cid),
-                "new_cluster_id": int(new_cid),
-                "merge_timestamp": waktu_proses,
-                "threshold_used": threshold,
-                "method": "hac_average_centroid"
-            })
-
-        reaming_olds = list(self.db.clusters.distinct("cluster_id", {
-            {"cluster_id": {"$in": [int(k) for k in cluster_map.keys()]}}
-        }))
-
-        if reaming_olds:
-            self.db.clusters.delete_many({
-                "cluster_id": {"$in": reaming_olds}
-            })
-        
-        self.evaluasi_cluster()
-        logging.info(f"HAC Merge | Clusters merged: {len(cluster_map)} | Remaining clusters: {len(unique_clusters) - len(cluster_map)}")
-
-    # menghitung pemisahan antar cluster
-    def compute_index_dunn(self, features, labels):
-        cluster = [features[labels == cid] for cid in set(labels)]
-
-        if len(cluster) < 2:
-            return 0
-
-        min_inter = np.min([
-            np.linalg.norm(np.mean(c1, axis=0) - np.mean(c2, axis=0))
-            for i, c1 in enumerate(cluster) 
-            for j, c2 in enumerate(cluster) if i < j
-        ])
-
-        max_intra = np.max([
-            np.mean(np.linalg.norm( c - np.mean(c, axis=0), axis=1))
-            for c in cluster if len(c) > 1
-        ])
-
-        return min_inter/max_intra if max_intra > 0 else 0
-    
-    # htung jarak intra dan inter cluster
-    def jarak_cluster(self, features, labels):
-        cluster = [features[labels == cid] for cid in set(labels)]
-
-        intra = np.mean([
-            np.mean(np.linalg.norm(c - np.mean(c, axis=0), axis=1))
-            for c in cluster if len(c) > 1
-        ])
-        inter = np.mean([
-            np.linalg.norm(np.mean(c1, axis=0) - np.mean(c2, axis=0))
-            for i, c1 in enumerate(cluster) 
-            for j, c2 in enumerate(cluster) if i < j
-        ]) if len(cluster) > 1 else 0
-        return intra, inter
-
-    # fungsi setup index pada mongoDB
-    def setup_indexes(self):
-        self.db.clusters.create_index("timestamp")
-        self.db.clusters.create_index("original_id", unique=True)
-        self.db.merge_history.create_index([
-            ("old_cluster_id", 1),
-            ("new_cluster_id", 1),
-            ("merge_timestamp", -1)
-        ])
-        self.db.StorageFootprint.create_index([
-            ("timestamp", -1)
-        ])
-        self.db.consumer_state.create_index("_id") # Untuk menyimpan status konsumen, _id adalah kunci utama dokumen
-
-    def lanjutkan_dari_state_terakhir(self):
-        state = self.db.consumer_state.find_one({"_id": "checkpoint"})
-        if state:
-            self.counter = state.get("counter", 0)
-            logging.info(f"Melanjutkan dari checkpoint: {self.counter} pesan telah diproses.")
         else:
-            logging.info("Tidak ada checkpoint ditemukan, memulai dari awal.")
-    
-    # bersihkan hail eval lama
-    def clear_old_evaluations(self, days=7):
-        cutoff = datetime.utcnow() - timedelta(days=days)
-        result = self.db.metrics_archive.delete_many({"timestamp": {"$lt": cutoff}})
-        logging.info(f"Old evaluations cleared: {result.deleted_count} records older than {days} days removed.")
-
-    # fugnsi untuk menyimpan status konsumen ke database untuk melanjutkan pemrosesan jika sistem dihentikan
-    def save_state(self): 
-        self.db.consumer_state.update_one(  
-            {"_id": "current_state"}, # Filter untuk menemukan dokumen dengan _id "current_state"
-            {
-                "$set": {
-                    "processed_count": self.counter,
-                    "last_update": datetime.utcnow(),
-                    "buffer_size": len(self.buffer_size),
-                    "model_params": {
-                        "clustering_threshold": getattr(self.model, "clustering_threshold", None),
-                        "fading_factor": getattr(self.model, "fading_factor", None)
-                    }
+            # No merge, save pre-merge metrics
+            if self.evaluator.pre_merge_metrics:
+                self.db_manager.db.metrics.replace_one(
+                    {"_id": "latest"},
+                    {**{"_id": "latest"}, **self.evaluator.pre_merge_metrics},
+                    upsert=True
+                )
+                archive_doc = {
+                    **self.evaluator.pre_merge_metrics,
+                    "clustering_threshold": self.model.clustering_threshold,
+                    "fading_factor": self.model.fading_factor,
+                    "stage": "no_merge"
                 }
-            },
-            upsert=True # Jika dokumen tidak ada, buat dokumen baru
+                self.db_manager.db.metrics_archive.insert_one(archive_doc)
+        
+        # 4. Track storage
+        self.storage_tracker.track_storage_footprint(
+            self.model, 
+            self.data_buffer, 
+            self.counter
         )
-    # fungsi untuk menyimpan footprint penyimpanan
-    def track_storage_footprint(self):
-        from pympler import asizeof
-        store_metrics = {
-            "timestamp": datetime.utcnow(),
-            "matrics": {
-                "total_points_processed": self.counter,
-                "buffer_length": len(self.buffer_size)
-            },
-            "database_matrics":{},
-            "model_params": {}
-        }
+        
+        # 5. Save full state
+        self.save_full_state()
+        
+        # Clear temporary metrics
+        self.evaluator.pre_merge_metrics = None
+        
+        logger.info(f"Checkpoint saved at {self.counter} messages")
+    
+    def merge_similar_clusters(self, threshold=0.7):
+        """
+        Merge similar clusters menggunakan HAC
+        
+        Returns:
+            bool: True jika ada merge, False jika tidak
+        """
+        if len(self.data_buffer) < 5:
+            return False
 
         try:
-            if asizeof:
-                store_metrics["model_metrics"]["model_size_bytes"] = asizeof.asizeof(self.model)
-                store_metrics["model_metrics"]["buffer_size_bytes"] = asizeof.asizeof(self.buffer_size)
+            features = np.array([f[:3] for f, _, _ in self.data_buffer])
+            labels = np.array([cid for _, cid, _ in self.data_buffer])
+            unique_clusters = np.unique(labels)
+            
+            if len(unique_clusters) < 2:
+                return False
+
+            # Compute centroids
+            centroids = np.array([
+                np.mean(features[labels == cid], axis=0) 
+                for cid in unique_clusters
+            ])
+            if centroids.shape[0] < 2:
+                return False
+
+            # HAC linkage
+            Z = linkage(centroids, method='average')
+            
+            # Adaptive threshold untuk over-segmentation
+            over_seg_ratio = len(unique_clusters) / len(self.data_buffer)
+            if over_seg_ratio > 0.1:
+                adaptive_threshold = threshold * 1.5
+                logger.info(f" Over-segmentation detected, using adaptive threshold: {adaptive_threshold:.2f}")
             else:
-                store_metrics["model_metrics"]["model_size_bytes"] = sys.getsizeof(self.model)
-                store_metrics["model_metrics"]["buffer_size_bytes"] = sys.getsizeof(self.buffer_size)
+                adaptive_threshold = threshold
+            
+            # Cluster grouping
+            group_labels = fcluster(Z, t=adaptive_threshold, criterion='distance')
+
+            # Build merge map
+            merged_map = {}
+            for grp in np.unique(group_labels):
+                members = unique_clusters[group_labels == grp]
+                rep = int(np.min(members))
+                for m in members:
+                    if int(m) != rep:
+                        merged_map[int(m)] = rep
+
+            if not merged_map:
+                return False
+
+            # Update buffer
+            new_buffer = deque(maxlen=self.data_buffer.maxlen)
+            for f, cid, lbl in self.data_buffer:
+                new_cid = merged_map.get(int(cid), int(cid))
+                new_buffer.append((f, new_cid, lbl))
+            self.data_buffer = new_buffer
+
+            # Update database
+            self.db_manager.update_merged_clusters(merged_map, adaptive_threshold)
+
+            logger.info(f"HAC merge complete: {len(merged_map)} clusters merged")
+            return True
+
         except Exception as e:
-            asizeof = None
-            logging.debug(f"ukuran model error: {e}")
-        
+            logger.error(f" Error in merge: {e}")
+            return False
     
-    # koneksi ke rabbitmq dan membuat channel
-    def connection(self):
+    def connect(self):
+        """Connect to RabbitMQ"""
         try:
             connection = pika.BlockingConnection(
                 pika.ConnectionParameters(
-                    host = self.host,
-                    blocked_connection_timeout=300,
-                    heartbeat=600 #heartbeat digunakan untuk menjaga koneksi tetap hidup
+                    host=self.host,
+                    heartbeat=600,
+                    blocked_connection_timeout=300
                 )
             )
             channel = connection.channel()
             channel.queue_declare(queue=self.queue, durable=True)
-            channel.basic_qos(prefetch_count=1) # memastikan satu pesan diproses pada satu waktu
+            channel.basic_qos(prefetch_count=1)
             return connection, channel
         except Exception as e:
-            logging.error(f"Error connecting to RabbitMQ: {e}")
-            raise e
-
-    # menjalankan semua fungsi untuk clustering secara real-time
-    def run_consumer(self):
+            logger.warning(f" Cannot connect to RabbitMQ: {e}")
+            return None, None
+    
+    def run(self):
+        """Main consumer loop"""
+        logger.info(" Starting consumer...")
+        
         while True:
-            connection, channel = self.connection()
+            connection, channel = self.connect()
             if connection is None or channel is None:
-                logging.error("menunggu koneksi ulang ke RabbitMQ...")
+                logger.info("Waiting for RabbitMQ...")
                 time.sleep(5)
                 continue
 
             def callback(ch, method, properties, body):
                 try:
                     message = json.loads(body)
-                    self.proses_data_consumer(message)  # fungsi kamu tetap menerima 1 argumen
+                    self.process_datapoint(message)
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                 except Exception as e:
-                    logging.error(f"Error in callback processing: {e}")
-                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                    logger.error(f" Error in callback: {e}")
+                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
             channel.basic_consume(
                 queue=self.queue,
@@ -384,72 +325,18 @@ class modelConsumer:
                 auto_ack=False
             )
 
-            logging.info(f"Menunggu pesan di RabbitMQ '{self.queue}'...")
+            logger.info(f"Listening to queue '{self.queue}'...")
             try:
                 channel.start_consuming()
+            except KeyboardInterrupt:
+                logger.info("  Interrupted by user. Saving state...")
+                self.save_full_state()
+                break
             except Exception as e:
-                logging.error(f"koneksi error: {e}")
-            finally:
-                if connection and not connection.is_closed:
-                    connection.close()
-                    logging.info("Koneksi RabbitMQ ditutup, mencoba koneksi ulang...")
-                self.save_state()
-                time.sleep(5)
-
-
-    def run_consumer(self):
-        while True:
-            connection, channel = self.connection()
-            if connection is None or channel is None:
-                logging.error("menunggu koneksi ulang ke RabbitMQ...")
-                time.sleep(5)
-                continue
-
-            def callback(ch, method, properties, body):
-                try:
-                    message = json.loads(body)
-                    self.proses_data_consumer(message)
-                    ch.basic_ack(delivery_tag=method.delivery_tag)
-                except Exception as e:
-                    logging.error(f"Error in callback processing: {e}")
-                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-
-            channel.basic_consume(queue=self.queue, on_message_callback=callback, auto_ack=False)
-
-
-            # def callback(ch, method, properties, body):
-            #     try:
-            #         message = json.loads(body)
-            #         self.proses_data_consumer(message)
-            #         ch.basic_ack(delivery_tag=method.delivery_tag)
-            #     except Exception as e:
-            #         logging.error(f"Error in callback processing: {e}")
-            #         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)\
-            
-            # channel.basic_consume(
-            #     queue=self.queue,
-            #     on_message_callback=callback,
-            #     auto_ack=False
-            # )
-            # channel.basic_consume(
-            #     queue=self.queue,
-            #     on_message_callback=lambda ch, method, properties, body: self.proses_data_consumer(json.loads(body)),
-            #     auto_ack=False)
-
-            logging.info(f"Menunggu pesan di RabbitMQ '{self.queue}'...")
-            try:
-                channel.start_consuming()
-            except Exception as e:
-                logging.error(f"koneksi error: {e}")
-            finally:
-                if connection and not connection.is_closed:
-                    connection.close()
-                    logging.info("Koneksi RabbitMQ ditutup, mencoba koneksi ulang...")
-                self.save_state()
+                logger.warning(f"  Connection error: {e}")
+                self.save_full_state()
                 time.sleep(5)
 
 if __name__ == "__main__":
-    consumer = modelConsumer(
-    )
-    consumer.run_consumer()
-                
+    consumer = ModelConsumer()
+    consumer.run()

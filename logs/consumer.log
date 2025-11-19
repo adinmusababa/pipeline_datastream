@@ -1,0 +1,197 @@
+2025-11-19 14:47:53 | INFO     | __main__             |  Full model state restored from snapshot
+2025-11-19 14:47:53 | INFO     | __main__             |  ModelConsumer initialized | Processed: 45070 messages
+2025-11-19 14:57:47 | INFO     | __main__             |  Full model state restored from snapshot
+2025-11-19 14:57:47 | INFO     | __main__             |  State restored: 47500 processed, 1000 in buffer
+2025-11-19 14:57:47 | INFO     | __main__             |  ModelConsumer initialized | Processed: 47500 messages
+2025-11-19 14:57:47 | INFO     | __main__             | Listening to queue 'data_stream'...
+2025-11-19 14:57:48 | INFO     | __main__             | HAC merge complete: 3 clusters merged
+2025-11-19 14:57:49 | INFO     | __main__             | HAC merge complete: 2 clusters merged
+2025-11-19 14:57:49 | INFO     | __main__             |   Interrupted by user. Saving state...
+2025-11-19 15:03:50 | INFO     | __main__             | Starting fresh
+2025-11-19 15:03:50 | INFO     | __main__             | Model initialized: CT=0.8, FF=0.0001
+2025-11-19 15:03:50 | INFO     | __main__             |  ModelConsumer initialized | Processed: 0 messages
+2025-11-19 15:03:50 | INFO     | __main__             | Listening to queue 'data_stream'...
+2025-11-19 15:03:50 | INFO     | __main__             |  Over-segmentation detected, using adaptive threshold: 1.05
+2025-11-19 15:03:50 | INFO     | __main__             | HAC merge complete: 5 clusters merged
+2025-11-19 15:03:51 | INFO     | __main__             | HAC merge complete: 1 clusters merged
+2025-11-19 15:03:51 | INFO     | __main__             | HAC merge complete: 1 clusters merged
+2025-11-19 15:03:52 | INFO     | __main__             | HAC merge complete: 2 clusters merged
+2025-11-19 15:03:52 | INFO     | __main__             | HAC merge complete: 1 clusters merged
+2025-11-19 15:03:53 | INFO     | __main__             | HAC merge complete: 2 clusters merged
+2025-11-19 15:03:53 | INFO     | __main__             | HAC merge complete: 6 clusters merged
+2025-11-19 15:03:54 | INFO     | __main__             | HAC merge complete: 8 clusters merged
+2025-11-19 15:03:55 | INFO     | __main__             | HAC merge complete: 6 clusters merged
+2025-11-19 15:03:55 | INFO     | __main__             |   Interrupted by user. Saving state...
+2025-11-19 15:09:47 | INFO     | __main__             |  Full model state restored from snapshot
+2025-11-19 15:09:47 | INFO     | __main__             |  State restored: 900 processed, 900 in buffer
+2025-11-19 15:09:47 | INFO     | __main__             |  ModelConsumer initialized | Processed: 900 messages
+2025-11-19 15:09:47 | INFO     | __main__             | Listening to queue 'data_stream'...
+2025-11-19 15:09:47 | INFO     | __main__             | HAC merge complete: 7 clusters merged
+2025-11-19 15:09:48 | INFO     | __main__             | HAC merge complete: 5 clusters merged
+2025-11-19 15:09:49 | INFO     | __main__             | HAC merge complete: 5 clusters merged
+2025-11-19 15:09:50 | INFO     | __main__             | HAC merge complete: 5 clusters merged
+2025-11-19 15:09:50 | INFO     | __main__             |   Interrupted by user. Saving state...
+2025-11-19 15:21:34 | INFO     | root                 | Logging configured
+2025-11-19 15:21:34 | INFO     | modelDB              | Database indexes created
+2025-11-19 15:21:34 | INFO     | modelDB              | DatabaseManager initialized for 'clustering_datastreaming'
+2025-11-19 15:21:34 | INFO     | modelEvaluasi        |  ClusterEvaluator initialized
+2025-11-19 15:21:34 | INFO     | modelStorageFootprint | StorageTracker initialized
+2025-11-19 15:21:34 | INFO     | modelDB              |  Consumer state found: 1400 processed
+2025-11-19 15:21:34 | INFO     | modelDB              | Model restored from snapshot at counter=1400
+2025-11-19 15:21:34 | INFO     | __main__             |  Full model state restored from snapshot
+2025-11-19 15:21:34 | INFO     | modelDB              | Buffer restored: 1000 items
+2025-11-19 15:21:34 | INFO     | __main__             |  State restored: 1400 processed, 1000 in buffer
+2025-11-19 15:21:34 | INFO     | __main__             |  ModelConsumer initialized | Processed: 1400 messages
+2025-11-19 15:21:34 | INFO     | __main__             |  Starting consumer...
+2025-11-19 15:21:34 | INFO     | __main__             | Listening to queue 'data_stream'...
+2025-11-19 15:21:35 | INFO     | modelDB              | Updated 5 merged clusters in database
+2025-11-19 15:21:35 | INFO     | __main__             | HAC merge complete: 5 clusters merged
+2025-11-19 15:21:35 | INFO     | modelEvaluasi        | Metrics | Silhouette: -0.056 | DBI: 1.794 | Clusters: 17
+2025-11-19 15:21:35 | INFO     | modelDB              | Model snapshot saved at counter=1500
+2025-11-19 15:21:36 | INFO     | modelDB              | Updated 2 merged clusters in database
+2025-11-19 15:21:36 | INFO     | __main__             | HAC merge complete: 2 clusters merged
+2025-11-19 15:21:36 | INFO     | modelEvaluasi        | Metrics | Silhouette: -0.145 | DBI: 1.868 | Clusters: 19
+2025-11-19 15:21:36 | INFO     | modelDB              | Model snapshot saved at counter=1600
+2025-11-19 15:21:36 | INFO     | modelDB              | Updated 3 merged clusters in database
+2025-11-19 15:21:36 | INFO     | __main__             | HAC merge complete: 3 clusters merged
+2025-11-19 15:21:36 | INFO     | modelEvaluasi        | Metrics | Silhouette: -0.047 | DBI: 2.161 | Clusters: 17
+2025-11-19 15:21:36 | INFO     | modelDB              | Model snapshot saved at counter=1700
+2025-11-19 15:21:37 | INFO     | modelDB              | Updated 3 merged clusters in database
+2025-11-19 15:21:37 | INFO     | __main__             | HAC merge complete: 3 clusters merged
+2025-11-19 15:21:37 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.001 | DBI: 2.085 | Clusters: 16
+2025-11-19 15:21:37 | INFO     | modelDB              | Model snapshot saved at counter=1800
+2025-11-19 15:21:38 | INFO     | __main__             |   Interrupted by user. Saving state...
+2025-11-19 15:21:38 | INFO     | modelDB              | Model snapshot saved at counter=1900
+2025-11-19 15:24:01 | INFO     | root                 | Logging configured
+2025-11-19 15:24:01 | INFO     | modelDB              | Database indexes created
+2025-11-19 15:24:01 | INFO     | modelDB              | DatabaseManager initialized for 'clustering_datastreaming'
+2025-11-19 15:24:01 | INFO     | modelEvaluasi        |  ClusterEvaluator initialized
+2025-11-19 15:24:01 | INFO     | modelStorageFootprint | StorageTracker initialized
+2025-11-19 15:24:01 | INFO     | modelDB              |  Consumer state found: 1900 processed
+2025-11-19 15:24:01 | INFO     | modelDB              | Model restored from snapshot at counter=1900
+2025-11-19 15:24:01 | INFO     | __main__             |  Full model state restored from snapshot
+2025-11-19 15:24:01 | INFO     | modelDB              | Buffer restored: 1000 items
+2025-11-19 15:24:01 | INFO     | __main__             |  State restored: 1900 processed, 1000 in buffer
+2025-11-19 15:24:01 | INFO     | __main__             |  ModelConsumer initialized | Processed: 1900 messages
+2025-11-19 15:24:01 | INFO     | __main__             |  Starting consumer...
+2025-11-19 15:24:01 | INFO     | __main__             | Listening to queue 'data_stream'...
+2025-11-19 15:24:01 | INFO     | modelDB              | Updated 3 merged clusters in database
+2025-11-19 15:24:01 | INFO     | __main__             | HAC merge complete: 3 clusters merged
+2025-11-19 15:24:01 | INFO     | modelEvaluasi        | Metrics | Silhouette: -0.018 | DBI: 2.212 | Clusters: 18
+2025-11-19 15:24:01 | INFO     | modelDB              | Model snapshot saved at counter=2000
+2025-11-19 15:24:01 | INFO     | __main__             | Checkpoint saved at 2000 messages
+2025-11-19 15:24:02 | INFO     | modelDB              | Updated 3 merged clusters in database
+2025-11-19 15:24:02 | INFO     | __main__             | HAC merge complete: 3 clusters merged
+2025-11-19 15:24:02 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.025 | DBI: 2.195 | Clusters: 17
+2025-11-19 15:24:02 | INFO     | modelDB              | Model snapshot saved at counter=2100
+2025-11-19 15:24:02 | INFO     | __main__             | Checkpoint saved at 2100 messages
+2025-11-19 15:24:03 | INFO     | modelDB              | Updated 2 merged clusters in database
+2025-11-19 15:24:03 | INFO     | __main__             | HAC merge complete: 2 clusters merged
+2025-11-19 15:24:03 | INFO     | modelEvaluasi        | Metrics | Silhouette: -0.031 | DBI: 2.385 | Clusters: 19
+2025-11-19 15:24:03 | INFO     | modelDB              | Model snapshot saved at counter=2200
+2025-11-19 15:24:03 | INFO     | __main__             | Checkpoint saved at 2200 messages
+2025-11-19 15:24:03 | INFO     | modelDB              | Updated 5 merged clusters in database
+2025-11-19 15:24:03 | INFO     | __main__             | HAC merge complete: 5 clusters merged
+2025-11-19 15:24:03 | INFO     | modelEvaluasi        | Metrics | Silhouette: -0.011 | DBI: 2.456 | Clusters: 19
+2025-11-19 15:24:03 | INFO     | modelDB              | Model snapshot saved at counter=2300
+2025-11-19 15:24:03 | INFO     | __main__             | Checkpoint saved at 2300 messages
+2025-11-19 15:24:04 | INFO     | modelDB              | Updated 2 merged clusters in database
+2025-11-19 15:24:04 | INFO     | __main__             | HAC merge complete: 2 clusters merged
+2025-11-19 15:24:04 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.020 | DBI: 2.395 | Clusters: 22
+2025-11-19 15:24:04 | INFO     | modelDB              | Model snapshot saved at counter=2400
+2025-11-19 15:24:04 | INFO     | __main__             | Checkpoint saved at 2400 messages
+2025-11-19 15:24:04 | INFO     | modelDB              | Updated 5 merged clusters in database
+2025-11-19 15:24:04 | INFO     | __main__             | HAC merge complete: 5 clusters merged
+2025-11-19 15:24:04 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.083 | DBI: 1.719 | Clusters: 20
+2025-11-19 15:24:04 | INFO     | modelDB              | Model snapshot saved at counter=2500
+2025-11-19 15:24:04 | INFO     | __main__             | Checkpoint saved at 2500 messages
+2025-11-19 15:24:05 | INFO     | modelDB              | Updated 3 merged clusters in database
+2025-11-19 15:24:05 | INFO     | __main__             | HAC merge complete: 3 clusters merged
+2025-11-19 15:24:05 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.025 | DBI: 1.580 | Clusters: 23
+2025-11-19 15:24:05 | INFO     | modelDB              | Model snapshot saved at counter=2600
+2025-11-19 15:24:05 | INFO     | __main__             | Checkpoint saved at 2600 messages
+2025-11-19 15:24:06 | INFO     | modelDB              | Updated 2 merged clusters in database
+2025-11-19 15:24:06 | INFO     | __main__             | HAC merge complete: 2 clusters merged
+2025-11-19 15:24:06 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.022 | DBI: 1.570 | Clusters: 23
+2025-11-19 15:24:06 | INFO     | modelDB              | Model snapshot saved at counter=2700
+2025-11-19 15:24:06 | INFO     | __main__             | Checkpoint saved at 2700 messages
+2025-11-19 15:24:06 | INFO     | modelDB              | Updated 1 merged clusters in database
+2025-11-19 15:24:06 | INFO     | __main__             | HAC merge complete: 1 clusters merged
+2025-11-19 15:24:06 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.025 | DBI: 1.524 | Clusters: 24
+2025-11-19 15:24:06 | INFO     | modelDB              | Model snapshot saved at counter=2800
+2025-11-19 15:24:06 | INFO     | __main__             | Checkpoint saved at 2800 messages
+2025-11-19 15:24:07 | INFO     | modelDB              | Updated 2 merged clusters in database
+2025-11-19 15:24:07 | INFO     | __main__             | HAC merge complete: 2 clusters merged
+2025-11-19 15:24:07 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.033 | DBI: 1.481 | Clusters: 24
+2025-11-19 15:24:07 | INFO     | modelDB              | Model snapshot saved at counter=2900
+2025-11-19 15:24:07 | INFO     | __main__             | Checkpoint saved at 2900 messages
+2025-11-19 15:24:07 | INFO     | modelDB              | Updated 3 merged clusters in database
+2025-11-19 15:24:07 | INFO     | __main__             | HAC merge complete: 3 clusters merged
+2025-11-19 15:24:08 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.048 | DBI: 1.286 | Clusters: 23
+2025-11-19 15:24:08 | INFO     | modelDB              | Model snapshot saved at counter=3000
+2025-11-19 15:24:08 | INFO     | __main__             | Checkpoint saved at 3000 messages
+2025-11-19 15:24:08 | INFO     | modelDB              | Updated 1 merged clusters in database
+2025-11-19 15:24:08 | INFO     | __main__             | HAC merge complete: 1 clusters merged
+2025-11-19 15:24:08 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.053 | DBI: 1.272 | Clusters: 24
+2025-11-19 15:24:08 | INFO     | modelDB              | Model snapshot saved at counter=3100
+2025-11-19 15:24:08 | INFO     | __main__             | Checkpoint saved at 3100 messages
+2025-11-19 15:24:09 | INFO     | modelDB              | Updated 4 merged clusters in database
+2025-11-19 15:24:09 | INFO     | __main__             | HAC merge complete: 4 clusters merged
+2025-11-19 15:24:09 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.078 | DBI: 1.277 | Clusters: 21
+2025-11-19 15:24:09 | INFO     | modelDB              | Model snapshot saved at counter=3200
+2025-11-19 15:24:09 | INFO     | __main__             | Checkpoint saved at 3200 messages
+2025-11-19 15:24:10 | INFO     | modelDB              | Updated 3 merged clusters in database
+2025-11-19 15:24:10 | INFO     | __main__             | HAC merge complete: 3 clusters merged
+2025-11-19 15:24:10 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.080 | DBI: 1.423 | Clusters: 20
+2025-11-19 15:24:10 | INFO     | modelDB              | Model snapshot saved at counter=3300
+2025-11-19 15:24:10 | INFO     | __main__             | Checkpoint saved at 3300 messages
+2025-11-19 15:24:10 | INFO     | modelDB              | Updated 4 merged clusters in database
+2025-11-19 15:24:10 | INFO     | __main__             | HAC merge complete: 4 clusters merged
+2025-11-19 15:24:10 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.111 | DBI: 2.112 | Clusters: 17
+2025-11-19 15:24:10 | INFO     | modelDB              | Model snapshot saved at counter=3400
+2025-11-19 15:24:10 | INFO     | __main__             | Checkpoint saved at 3400 messages
+2025-11-19 15:24:11 | INFO     | modelDB              | Updated 5 merged clusters in database
+2025-11-19 15:24:11 | INFO     | __main__             | HAC merge complete: 5 clusters merged
+2025-11-19 15:24:11 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.143 | DBI: 1.940 | Clusters: 18
+2025-11-19 15:24:11 | INFO     | modelDB              | Model snapshot saved at counter=3500
+2025-11-19 15:24:11 | INFO     | __main__             | Checkpoint saved at 3500 messages
+2025-11-19 15:24:12 | INFO     | modelDB              | Updated 8 merged clusters in database
+2025-11-19 15:24:12 | INFO     | __main__             | HAC merge complete: 8 clusters merged
+2025-11-19 15:24:12 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.091 | DBI: 1.525 | Clusters: 17
+2025-11-19 15:24:12 | INFO     | modelDB              | Model snapshot saved at counter=3600
+2025-11-19 15:24:12 | INFO     | __main__             | Checkpoint saved at 3600 messages
+2025-11-19 15:24:12 | INFO     | modelDB              | Updated 3 merged clusters in database
+2025-11-19 15:24:12 | INFO     | __main__             | HAC merge complete: 3 clusters merged
+2025-11-19 15:24:12 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.153 | DBI: 1.397 | Clusters: 18
+2025-11-19 15:24:12 | INFO     | modelDB              | Model snapshot saved at counter=3700
+2025-11-19 15:24:12 | INFO     | __main__             | Checkpoint saved at 3700 messages
+2025-11-19 15:24:13 | INFO     | modelDB              | Updated 6 merged clusters in database
+2025-11-19 15:24:13 | INFO     | __main__             | HAC merge complete: 6 clusters merged
+2025-11-19 15:24:13 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.141 | DBI: 1.357 | Clusters: 20
+2025-11-19 15:24:13 | INFO     | modelDB              | Model snapshot saved at counter=3800
+2025-11-19 15:24:13 | INFO     | __main__             | Checkpoint saved at 3800 messages
+2025-11-19 15:24:13 | INFO     | modelDB              | Updated 5 merged clusters in database
+2025-11-19 15:24:13 | INFO     | __main__             | HAC merge complete: 5 clusters merged
+2025-11-19 15:24:13 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.127 | DBI: 1.660 | Clusters: 21
+2025-11-19 15:24:14 | INFO     | modelDB              | Model snapshot saved at counter=3900
+2025-11-19 15:24:14 | INFO     | __main__             | Checkpoint saved at 3900 messages
+2025-11-19 15:24:14 | INFO     | modelDB              | Updated 6 merged clusters in database
+2025-11-19 15:24:14 | INFO     | __main__             | HAC merge complete: 6 clusters merged
+2025-11-19 15:24:14 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.111 | DBI: 1.587 | Clusters: 21
+2025-11-19 15:24:14 | INFO     | modelDB              | Model snapshot saved at counter=4000
+2025-11-19 15:24:14 | INFO     | __main__             | Checkpoint saved at 4000 messages
+2025-11-19 15:24:15 | INFO     | modelDB              | Updated 4 merged clusters in database
+2025-11-19 15:24:15 | INFO     | __main__             | HAC merge complete: 4 clusters merged
+2025-11-19 15:24:15 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.076 | DBI: 1.801 | Clusters: 21
+2025-11-19 15:24:15 | INFO     | modelDB              | Model snapshot saved at counter=4100
+2025-11-19 15:24:15 | INFO     | __main__             | Checkpoint saved at 4100 messages
+2025-11-19 15:24:16 | INFO     | modelDB              | Updated 4 merged clusters in database
+2025-11-19 15:24:16 | INFO     | __main__             | HAC merge complete: 4 clusters merged
+2025-11-19 15:24:16 | INFO     | modelEvaluasi        | Metrics | Silhouette: 0.025 | DBI: 1.682 | Clusters: 21
+2025-11-19 15:24:16 | INFO     | modelDB              | Model snapshot saved at counter=4200
+2025-11-19 15:24:16 | INFO     | __main__             | Checkpoint saved at 4200 messages
+2025-11-19 15:24:16 | INFO     | modelDB              | Updated 6 merged clusters in database
+2025-11-19 15:24:16 | INFO     | __main__             | HAC merge complete: 6 clusters merged
+2025-11-19 15:24:16 | INFO     | modelEvaluasi        | Metrics | Silhouette: -0.017 | DBI: 1.615 | Clusters: 22
+2025-11-19 15:24:16 | INFO     | modelDB              | Model snapshot saved at counter=4300
+2025-11-19 15:24:16 | INFO     | __main__             | Checkpoint saved at 4300 messages

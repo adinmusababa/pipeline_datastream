@@ -6,13 +6,16 @@ from pymongo import MongoClient
 import logging
 import json
 from sklearn.preprocessing import OrdinalEncoder, StandardScaler, MinMaxScaler
+import sys
 
+from modelPreprocessing import StreamPreprocessor
 
 class modelProducer:
     def __init__(self, bootstrap_servers="localhost", topic="data_stream"):
         self.bootstrap_servers = bootstrap_servers
         self.topic = topic
-
+        self.preprocessor = StreamPreprocessor.load("models/preprocessor.pkl")
+    
         # collections untuk cekpoint
         self.checkpoint_collection = "checkpoint_producer"
 
@@ -75,22 +78,56 @@ class modelProducer:
                 
                 self.logger.info(f"Sisa data untuk diproses: {remaining_count}")
 
-                # proses data dalam batch
+                # # proses data dalam batch
+                # cursor = collection.find(query).sort("_id", 1)
+                # batch = []
+
+                # for document in cursor:
+                #     batch.append(document)
+                #     if len(batch) >= batch_size:
+                #         bublised_data = self.prosess_batch(batch, channel, db)
+                #         total_published += bublised_data
+
+                #         # update checkpoint
+                #         last_processed_id = batch[-1]["_id"]
+                #         self.save_checkpoint(db, last_processed_id, total_published)
+                        
+                #         batch = []
                 cursor = collection.find(query).sort("_id", 1)
                 batch = []
 
                 for document in cursor:
                     batch.append(document)
+                    
                     if len(batch) >= batch_size:
-                        bublised_data = self.prosess_batch(batch, channel, db)
-                        total_published += bublised_data
-
-                        # update checkpoint
+                        # ✅ Process batch dengan reconnection handling
+                        published_data = self.prosess_batch(batch, channel, db)
+                        total_published += published_data
+                        
+                        # ✅ Check if connection closed during processing
+                        if published_data < len(batch):
+                            self.logger.warning(f"⚠️  Incomplete batch ({published_data}/{len(batch)}), reconnecting...")
+                            
+                            # Close old connection
+                            try:
+                                connection.close()
+                            except:
+                                pass
+                            
+                            # Reconnect
+                            connection, channel = self.setup_rabitmq(host='localhost', queue=self.topic)
+                            if connection is None or channel is None:
+                                self.logger.error("❌ Reconnection failed!")
+                                time.sleep(5)
+                                continue
+                            
+                            self.logger.info("✅ Reconnected to RabbitMQ")
+                        
+                        # Update checkpoint
                         last_processed_id = batch[-1]["_id"]
                         self.save_checkpoint(db, last_processed_id, total_published)
                         
-                        batch = []
-                
+                        batch = []                
                 # proses sisa data dalam batch
                 if batch:
                     publised = self.prosess_batch(batch, channel, db)
@@ -105,14 +142,15 @@ class modelProducer:
                     break
                 else:
                     time.sleep(10)
-                
-                connection.close()
-                client.close()
-                self.logger.info("Proses publish data selesai.")
+            self.cleanup()    
+            connection.close()
+            client.close()
+            self.logger.info("Proses publish data selesai.")
 
         except KeyboardInterrupt:
             self.logger.error(f"proses dihentikan oleh user.")
         finally:
+            self.cleanup()
             try:
                 connection.close()
             except:
@@ -123,112 +161,129 @@ class modelProducer:
                 pass
 
 
-    # fungsi untuk mendapatkan checkpoint terakhir
-    def checkpoint_update(self,db):
-        checkpoint = db[self.collections_point].find_one({"_id","last_processed"})
+    # fungsi untuk mendapatkan checkpoint terakhir 
+    def checkpoint_update(self, db):
+        checkpoint = db[self.checkpoint_collection].find_one({"_id": "last_processed"})
+        
         if checkpoint:
-            self.logger.info("Checkpoint ditemukan : {checkpoint['last_id]}")
-            return checkpoint["last_id"], checkpoint["count"]
+            self.logger.info(f"Checkpoint ditemukan: {checkpoint.get('last_id')}")
+            return checkpoint.get("last_id"), checkpoint.get("count", 0)
         else:
             self.logger.info("Tidak ada checkpoint ditemukan. Memulai dari awal.")
             return None, 0
+
         
     # fungsi untuk mengatur koneksi ke RabitMQ, 
     def setup_rabitmq(self, host="localhost", queue="data_stream"):
-        # sekema kesalahan yang ditangani
+
         try:
-            connection = pika.BlockingConnection(pika.ConnectionParameters(
-                host=host,
-            ))
+            connection = pika.BlockingConnection(
+                pika.ConnectionParameters(
+                    host=host,
+                    heartbeat=600,  # Heartbeat every 10 minutes
+                    blocked_connection_timeout=300,  # 5 minutes timeout
+                    connection_attempts=3,  # Retry 3x jika gagal
+                    retry_delay=2  # Wait 2s between retries
+                )
+            )
             channel = connection.channel()
             channel.queue_declare(queue=queue, durable=True)
-            self.logger.info("kneksi ke RabitMQ berhasil.")
-            return connection, channel
-        except Exception as e:
-            self.logger.error(f"Gagal menghubungkan ke RabitMQ: {e}")
-            return None, None
 
+            channel.basic_qos(prefetch_count=1)
+            
+            self.logger.info("✅ Koneksi ke RabbitMQ berhasil.")
+            return connection, channel
+            
+        except Exception as e:
+            self.logger.error(f"❌ Gagal menghubungkan ke RabbitMQ: {e}")
+            return None, None\
+            
     # fungsi proses batch data
     def prosess_batch(self, batch, channel, db):
-        df = pd.DataFrame(batch)
-        if df.empty:
+        """Process batch dengan connection error handling"""
+        if not batch:
             return 0
 
         try:
             published_count = 0
-
-            # ENCODING behavior
-            behavior_order = [['pv', 'fav', 'cart', 'buy']]
-            ordinal_encoder = OrdinalEncoder(categories=behavior_order)
-            df['behavior_encoded'] = ordinal_encoder.fit_transform(df[['Behavior type']])
-
-            # SCALING fitur numerik
-            id_features = ['User ID', 'Item ID', 'Category ID']
-            standar_scaler = StandardScaler()
-            df[id_features] = standar_scaler.fit_transform(df[id_features])
-
-            minmax_scaler = MinMaxScaler()
-            df['timestamp_scaled'] = minmax_scaler.fit_transform(df[['Timestamp']])
-
-            # fitur untuk clustering
-            features_for_clustering = [
-                'User ID',
-                'Item ID',
-                'Category ID',
-                'behavior_encoded',
-                'timestamp_scaled'
-            ]
             
-            self.logger.info(f"Batch siap diproses: {len(df)} baris, kolom: {list(df.columns)}")
+            self.logger.info(f"📦 Processing batch: {len(batch)} documents")
             
-            self.logger.info(df[features_for_clustering].head(3).to_dict(orient="records"))            
-            self.logger.info(f"Batch siap diproses: {len(df)} baris, kolom: {list(df.columns)}")
-            self.logger.info(df[features_for_clustering].head(3).to_dict(orient="records"))
-            
-            # kirim ke RabbitMQ
-            for _, row in df.iterrows():
-                features = row[features_for_clustering].tolist()
-                message = {
-                    'features': features,
-                    'timestamp': int(row['Timestamp']),
-                    'metadata': {
-                        'original_id': str(row.get('_id', '')),
-                        'behavior_type': row.get('Behavior type', ''),
-                        'User ID': int(row['User ID']),
-                        'Item ID': int(row['Item ID']),
-                        'Category ID': int(row['Category ID']),
-                        'Timestamp': int(row['Timestamp'])
-                    },
-                    'raw_data': {
-                        'User ID': int(row['User ID']),
-                        'Item ID': int(row['Item ID']),
-                        'Category ID': int(row['Category ID']),
-                        'Behavior type': row.get('Behavior type', ''),
-                        'Timestamp': int(row['Timestamp'])
+            for idx, document in enumerate(batch):
+                try:
+                    # Extract raw data
+                    raw_data = {
+                        'User ID': document.get('User ID'),
+                        'Item ID': document.get('Item ID'),
+                        'Category ID': document.get('Category ID'),
+                        'Behavior type': document.get('Behavior type'),
+                        'Timestamp': document.get('Timestamp')
                     }
-                }
-                if published_count < 3:  # hanya log 3 pesan pertama biar gak banjir log
-                    self.logger.info(f"Pesan #{published_count+1} -> {json.dumps(message, indent=2)}")
                     
-
-                channel.basic_publish(
-                    exchange='',
-                    routing_key=self.topic,
-                    body=json.dumps(message),
-                    properties=pika.BasicProperties(delivery_mode=2)
-                )
-
-                published_count += 1
-                time.sleep(0.01)
-
-            self.logger.info(f"Total pesan terkirim dari batch ini: {published_count}")
+                    # Streaming preprocessing
+                    features = self.preprocessor.fit_transform_one(raw_data)
+                    
+                    # ✅ Check if features are valid (not all zeros)
+                    if all(f == 0.0 for f in features):
+                        self.logger.warning(f"⚠️  All-zero features at idx {idx}, skipping...")
+                        continue
+                    
+                    # Build message
+                    message = {
+                        'features': features,
+                        'timestamp': int(document['Timestamp']),
+                        'metadata': {
+                            'original_id': str(document.get('_id', '')),
+                            'behavior_type': document.get('Behavior type', ''),
+                            'Item ID': int(document['Item ID']),
+                            'Category ID': int(document['Category ID']),
+                            'Timestamp': int(document['Timestamp'])
+                        },
+                        'raw_data': raw_data
+                    }
+                    
+                    # Log first 3 messages
+                    if published_count < 3:
+                        self.logger.info(f"📤 Message #{published_count+1}:")
+                        self.logger.info(f"   Raw: {raw_data}")
+                        self.logger.info(f"   Features: {features}")
+                    
+                    # ✅ Publish dengan error handling
+                    try:
+                        channel.basic_publish(
+                            exchange='',
+                            routing_key=self.topic,
+                            body=json.dumps(message),
+                            properties=pika.BasicProperties(delivery_mode=2)
+                        )
+                        published_count += 1
+                        
+                    except pika.exceptions.ConnectionClosed:
+                        self.logger.error("❌ RabbitMQ connection closed!")
+                        # Return count untuk trigger reconnect
+                        return published_count
+                    
+                    time.sleep(0.01)
+                
+                except Exception as e:
+                    self.logger.error(f"❌ Error processing document {idx}: {e}")
+                    continue
+            
+            self.logger.info(f"✅ Batch complete: {published_count}/{len(batch)} messages published")
+            
+            # Save preprocessor state
+            if published_count > 0:
+                self.preprocessor.save("models/preprocessor.pkl")
+            
             return published_count
-
+        
         except Exception as e:
-            self.logger.error(f"Gagal memproses batch: {e}")
-            return 0
+            self.logger.error(f"❌ Batch processing failed: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return 0       
 
-    
+         
     def save_checkpoint(self, db, last_id, count):
         db[self.checkpoint_collection].update_one(
             {"_id": "last_processed"},
@@ -253,7 +308,20 @@ class modelProducer:
                 }
             }
         )
-    
+
+
+    def cleanup(self):
+        """
+        Cleanup saat producer selesai
+        """
+        try:
+            # Save final preprocessor state
+            self.preprocessor.save("models/preprocessor.pkl")
+            self.logger.info("Final preprocessor state saved")
+        except Exception as e:
+            self.logger.error(f"Cleanup failed: {e}")
+
+
     def get_checkpoint_update(self, db):
         checkpoint = db[self.checkpoint_collection].find_one({"_id": "last_processed"})
         if checkpoint:

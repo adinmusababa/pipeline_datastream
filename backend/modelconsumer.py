@@ -33,6 +33,7 @@ class modelConsumer:
         self.model = None
         self.data_buffer = deque(maxlen=buffer_size)
         self.counter = 0
+        self.pre_merge_metrics = None
         self.storage_tracking_interval = 1000
 
         # MongoDB
@@ -45,7 +46,7 @@ class modelConsumer:
         # CRITICAL: Restore full state including model
         self.restore_full_state()
         
-        logging.info(f"✅ Consumer initialized | Processed: {self.counter} messages")
+        logging.info(f"Consumer initialized | Processed: {self.counter} messages")
 
     def setup_indexes(self):
         self.db.clusters.create_index("timestamp")
@@ -245,26 +246,67 @@ class modelConsumer:
                 "processing_counter": self.counter  # Track order
             })
 
-            # Periodic operations
-            if self.counter % 1000 == 0:
-                self.evaluate_internal_metrics()
-                self.merge_similar_clusters()
-                self.track_storage_footprint()
-                self.save_full_state()  # Save FULL state termasuk model
-                logging.info(f"Full checkpoint saved at {self.counter} messages")
+            # if self.counter % 100 == 0:
+            #     # Merge dulu, baru evaluate & save
+            #     self.merge_similar_clusters()  # 1. Merge HAC terlebih dahulu
+            #     self.evaluate_internal_metrics()  # 2. Evaluate hasil setelah merge
+            #     self.track_storage_footprint()
+            #     self.save_full_state()
+            #     logging.info(f"Checkpoint saved at {self.counter} messages")
 
             if self.counter % 100 == 0:
-                num_microclusters = len(getattr(self.model, 'centers', []))
-                logging.info(f"Processed: {self.counter} | Cluster: {cluster_id} | Micro-clusters: {num_microclusters}")
+                # Evaluate SEBELUM merge (simpan di memory)
+                self.pre_merge_metrics = self.evaluate_internal_metrics(
+                    save_to_db=False,  # Tidak save ke DB dulu
+                    label_suffix="pre_merge"
+                )
+                
+                # Lakukan HAC merge
+                merge_happened = self.merge_similar_clusters()  # Return True jika ada merge
+                
+                # Evaluate SETELAH merge (save ke DB)
+                if merge_happened:
+                    # Jika ada merge, evaluate hasil final
+                    self.evaluate_internal_metrics(
+                        save_to_db=True,
+                        label_suffix="post_merge"
+                    )
+                else:
+                    # Jika tidak ada merge, save metrics pre-merge
+                    if self.pre_merge_metrics:
+                        self.db.metrics.replace_one(
+                            {"_id": "latest"},
+                            {**{"_id": "latest"}, **self.pre_merge_metrics},
+                            upsert=True
+                        )
+                        archive_doc = {
+                            **self.pre_merge_metrics,
+                            "clustering_threshold": getattr(self.model, "clustering_threshold", None),
+                            "fading_factor": getattr(self.model, "fading_factor", None),
+                            "stage": "no_merge"
+                        }
+                        self.db.metrics_archive.insert_one(archive_doc)
+                
+                # Track storage & save state
+                self.track_storage_footprint()
+                self.save_full_state()
+                
+                # Clear temporary metrics
+                self.pre_merge_metrics = None
+                
+                logging.info(f"Checkpoint saved at {self.counter} messages")
+            # if self.counter % 100 == 0:
+            #     num_microclusters = len(getattr(self.model, 'centers', []))
+            #     logging.info(f"Processed: {self.counter} | Cluster: {cluster_id} | Micro-clusters: {num_microclusters}")
 
         except Exception as e:
             logging.error(f"Error processing datapoint: {e}")
             import traceback
             logging.error(traceback.format_exc())
 
-    def evaluate_internal_metrics(self):
+    def evaluate_internal_metrics(self, save_to_db=True, label_suffix=""):
         if len(self.data_buffer) < 5:
-            return
+            return None
 
         try:
             features = np.array([f[:3] for f, _, _ in self.data_buffer])
@@ -272,7 +314,7 @@ class modelConsumer:
             unique_clusters = np.unique(labels)
 
             if len(unique_clusters) < 2:
-                return
+                return None
 
             try:
                 silhouette = silhouette_score(features, labels)
@@ -283,53 +325,54 @@ class modelConsumer:
             dunn = self.compute_dunn_index(features, labels)
             intra, inter = self.compute_cluster_distances(features, labels)
 
-            # SOLUSI 5: Track over-segmentation
-            over_segmentation_ratio = len(unique_clusters) / len(self.data_buffer)
-
-            self.db.metrics.replace_one(
-                {"_id": "latest"},
-                {
-                    "_id": "latest",
-                    "total_data": self.counter,
-                    "active_clusters": len(unique_clusters),
-                    "silhouette": float(silhouette),
-                    "davies_bouldin": float(db_index),
-                    "dunn_index": float(dunn),
-                    "intra_distance": float(intra),
-                    "inter_distance": float(inter),
-                    "over_segmentation_ratio": float(over_segmentation_ratio),
-                    "timestamp": datetime.utcnow()
-                },
-                upsert=True
-            )
-
-            self.db.metrics_archive.insert_one({
-                "timestamp": datetime.utcnow(),
+            metrics_data = {
+                "total_data": self.counter,
+                "active_clusters": len(unique_clusters),
                 "silhouette": float(silhouette),
                 "davies_bouldin": float(db_index),
                 "dunn_index": float(dunn),
                 "intra_distance": float(intra),
                 "inter_distance": float(inter),
-                "total_data": self.counter,
-                "active_clusters": len(unique_clusters),
-                "over_segmentation_ratio": float(over_segmentation_ratio),
-                "clustering_threshold": getattr(self.model, "clustering_threshold", None),
-                "fading_factor": getattr(self.model, "fading_factor", None)
-            })
+                "timestamp": datetime.utcnow()
+            }
+
+            # Save to DB jika diminta
+            if save_to_db:
+                # Update latest metrics
+                self.db.metrics.replace_one(
+                    {"_id": "latest"},
+                    {**{"_id": "latest"}, **metrics_data},
+                    upsert=True
+                )
+
+                # Archive metrics dengan suffix
+                archive_doc = {
+                    **metrics_data,
+                    "clustering_threshold": getattr(self.model, "clustering_threshold", None),
+                    "fading_factor": getattr(self.model, "fading_factor", None),
+                    "stage": "post_merge" if not label_suffix else label_suffix  # Label stage
+                }
+                
+                # JIKA ADA PRE-MERGE METRICS, SIMPAN PERBANDINGAN
+                if self.pre_merge_metrics:
+                    archive_doc["pre_merge_clusters"] = self.pre_merge_metrics["active_clusters"]
+                    archive_doc["cluster_reduction"] = self.pre_merge_metrics["active_clusters"] - len(unique_clusters)
+                    archive_doc["silhouette_improvement"] = float(silhouette) - self.pre_merge_metrics["silhouette"]
+                
+                self.db.metrics_archive.insert_one(archive_doc)
+                
+                logging.info(f"Metrics | Silhouette: {silhouette:.3f} | DBI: {db_index:.3f} | Clusters: {len(unique_clusters)}")
             
-            # Warning jika over-segmentation
-            if over_segmentation_ratio > 0.1:  # Lebih dari 10% data jadi cluster sendiri
-                logging.warning(f"OVER-SEGMENTATION DETECTED: {len(unique_clusters)} clusters for {len(self.data_buffer)} points ({over_segmentation_ratio:.2%})")
-            
-            logging.info(f"Metrics | Silhouette: {silhouette:.3f} | DBI: {db_index:.3f} | Clusters: {len(unique_clusters)}")
+            return metrics_data
 
         except Exception as e:
             logging.error(f"Error in evaluation: {e}")
+            return None
 
     def merge_similar_clusters(self, threshold=0.7):
 
         if len(self.data_buffer) < 5:
-            return
+            return False
 
         try:
             features = np.array([f[:3] for f, _, _ in self.data_buffer])
@@ -337,12 +380,12 @@ class modelConsumer:
             unique_clusters = np.unique(labels)
             
             if len(unique_clusters) < 2:
-                return
+                return False
 
             # Hitung centroid
             centroids = np.array([np.mean(features[labels == cid], axis=0) for cid in unique_clusters])
             if centroids.shape[0] < 2:
-                return
+                return False
 
             # HAC pada centroid dengan threshold lebih aggressive
             Z = linkage(centroids, method='average')
@@ -368,8 +411,8 @@ class modelConsumer:
                         merged_map[int(m)] = rep
 
             if not merged_map:
-                return
-
+                return False
+ 
             # Update buffer
             new_buffer = deque(maxlen=self.data_buffer.maxlen)
             for f, cid, lbl in self.data_buffer:
@@ -378,32 +421,46 @@ class modelConsumer:
             self.data_buffer = new_buffer
 
             # Update database
+            # current_time = datetime.utcnow()
+            # for old_cid, new_cid in merged_map.items():
+            #     self.db.clusters.update_many(
+            #         {"cluster_id": int(old_cid)},
+            #         {
+            #             "$set": {
+            #                 "cluster_id": int(new_cid),
+            #                 "last_updated": current_time
+            #             }
+            #         }
+            #     )
+            #     self.db.merge_history.insert_one({
+            #         "old_cluster_id": int(old_cid),
+            #         "new_cluster_id": int(new_cid),
+            #         "merge_timestamp": current_time,
+            #         "threshold_used": adaptive_threshold,
+            #         "method": "hac_average_centroid_adaptive"
+            #     })
+
             current_time = datetime.utcnow()
             for old_cid, new_cid in merged_map.items():
                 self.db.clusters.update_many(
                     {"cluster_id": int(old_cid)},
-                    {
-                        "$set": {
-                            "cluster_id": int(new_cid),
-                            "last_updated": current_time
-                        }
-                    }
+                    {"$set": {"cluster_id": int(new_cid), "last_updated": current_time}}
                 )
                 self.db.merge_history.insert_one({
                     "old_cluster_id": int(old_cid),
                     "new_cluster_id": int(new_cid),
                     "merge_timestamp": current_time,
-                    "threshold_used": adaptive_threshold,
-                    "method": "hac_average_centroid_adaptive"
+                    "threshold_used": threshold,
+                    "method": "hac_average_centroid"
                 })
-
             # Cleanup
             remaining_olds = list(self.db.clusters.distinct("cluster_id", {"cluster_id": {"$in": [int(k) for k in merged_map.keys()]}}))
             if remaining_olds:
                 self.db.clusters.delete_many({"cluster_id": {"$in": remaining_olds}})
 
-            self.evaluate_internal_metrics()
-            logging.info(f"HAC merge complete: {len(merged_map)} clusters merged")
+            # self.evaluate_internal_metrics()
+            logging.info(f"HAC merge complete merged")
+            return True
 
         except Exception as e:
             logging.error(f"Error in merge: {e}")
