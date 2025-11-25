@@ -13,10 +13,11 @@ A. yang peru dioptimasikan
 
 B. Tampilan di dahboard akan memuat apa saja:
 1. performa model, meliputi jumlah data yang diproses, matrix evaluasi, 
-2. footprint, latency, memori dll
+2. footprint, latency, memori, Latency & throughput monitoring dll
 3. visualisasi hasil cluster, cluster distribution, cluster proportion
 4. interpretasi dari hasil cluster, misal cluster 0 karakter bagaimana atau segmentasinya bagaimana
 5. cluster profil yang terbuat. 
+6. kasih analisis monitoring terhadap pertumbuhan cluster misal perwaktu atau perdata dalam bentuk grafit serta nilai evaluasi nilai evaluasi perwaktu juga,
 
 c. Pisahkan per fungsi atau metod dengan pemisahan
 untuk database ambil dari  fungsi di file modelDB.py
@@ -69,5 +70,3 @@ Saat drift terdeteksi: trigger retrain/rebuild window / increase decay rate so o
 E. Latency & throughput monitoring
 
 Metrik teknis penting: processing latency per event (p50/p95/p99), throughput (msgs/sec), memory usage (#microclusters, mem footprint), GC pauses.
-
-Tools: Prometheus + Grafana. Ekspos metrik dari worker (histograms for latency, counters for events, gauges for #clusters).
