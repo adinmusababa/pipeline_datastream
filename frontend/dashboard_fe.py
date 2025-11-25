@@ -4,7 +4,7 @@ import numpy as np
 from datetime import datetime, timedelta, timezone
 from pymongo import MongoClient
 import plotly.express as px
-from streamlit_autorefresh import st_autorefresh
+# from streamlit_autorefresh import st_autorefresh
 import plotly.graph_objects as go
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
@@ -367,7 +367,7 @@ def create_pca_cluster_plot(df):
     except Exception as e:
         st.error(f"Error creating plot: {e}")
         return None
-
+        
 # Status Pipeline 
 def render_pipeline_status():
     st.markdown("### Status Pipeline Monitoring")
@@ -423,10 +423,393 @@ def render_pipeline_status():
     except Exception as e:
         st.error(f"Error: {e}")
 
+
+# @st.cache_data(ttl=30)
+def load_cluster_growth_data():
+    """
+    Load data pertumbuhan cluster dari metrics_archive
+    """
+    try:
+        db = get_db()
+        # Ambil data metrics archive (sorted by timestamp)
+        docs = list(db.metrics_archive.find().sort("timestamp", 1))
+        
+        if not docs:
+            return None
+        
+        df = pd.DataFrame(docs)
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        
+        return df
+    
+    except Exception as e:
+        st.error(f"❌ Error loading cluster growth data: {e}")
+        return None
+
+
+# @st.cache_data(ttl=30)
+def load_merge_history():
+    """
+    Load riwayat merge cluster
+    """
+    try:
+        db = get_db()
+        docs = list(db.merge_history.find().sort("merge_timestamp", 1))
+        
+        if not docs:
+            return None
+        
+        df = pd.DataFrame(docs)
+        df['merge_timestamp'] = pd.to_datetime(df['merge_timestamp'])
+        
+        return df
+    
+    except Exception as e:
+        st.error(f"❌ Error loading merge history: {e}")
+        return None
+
+
+def render_cluster_growth_monitoring(metrics_df, merge_df):
+    """
+    Render monitoring pertumbuhan cluster & evaluasi
+    """
+    st.subheader("📈 Cluster Growth Monitoring")
+    
+    if metrics_df is None or metrics_df.empty:
+        st.warning("⚠️ Belum ada data monitoring tersedia")
+        return
+    
+    # === 1. CLUSTER GROWTH OVER TIME ===
+    st.markdown("#### 🔢 Pertumbuhan Jumlah Cluster")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Line chart: Active clusters over time
+        fig_cluster_growth = go.Figure()
+        
+        fig_cluster_growth.add_trace(go.Scatter(
+            x=metrics_df['timestamp'],
+            y=metrics_df['active_clusters'],
+            mode='lines+markers',
+            name='Active Clusters',
+            line=dict(color='#3b82f6', width=2),
+            marker=dict(size=6)
+        ))
+        
+        # Tambahkan garis trend
+        if len(metrics_df) > 5:
+            z = np.polyfit(range(len(metrics_df)), metrics_df['active_clusters'], 1)
+            p = np.poly1d(z)
+            fig_cluster_growth.add_trace(go.Scatter(
+                x=metrics_df['timestamp'],
+                y=p(range(len(metrics_df))),
+                mode='lines',
+                name='Trend',
+                line=dict(color='red', dash='dash', width=1)
+            ))
+        
+        fig_cluster_growth.update_layout(
+            title="Jumlah Cluster Aktif Over Time",
+            xaxis_title="Waktu",
+            yaxis_title="Jumlah Cluster",
+            height=400,
+            hovermode='x unified'
+        )
+        
+        st.plotly_chart(fig_cluster_growth, use_container_width=True)
+        
+        # Statistik cluster growth
+        st.markdown("**📊 Statistik Pertumbuhan:**")
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            st.metric("Min Clusters", int(metrics_df['active_clusters'].min()))
+        with col_b:
+            st.metric("Max Clusters", int(metrics_df['active_clusters'].max()))
+        with col_c:
+            st.metric("Avg Clusters", f"{metrics_df['active_clusters'].mean():.1f}")
+    
+    with col2:
+        # Bar chart: Cluster growth per data processed
+        fig_cluster_per_data = go.Figure()
+        
+        # Hitung cluster per 1000 data
+        metrics_df['cluster_per_1k'] = (metrics_df['active_clusters'] / metrics_df['total_data']) * 1000
+        
+        fig_cluster_per_data.add_trace(go.Bar(
+            x=metrics_df['total_data'],
+            y=metrics_df['cluster_per_1k'],
+            marker=dict(color='#10b981'),
+            name='Clusters per 1K data'
+        ))
+        
+        fig_cluster_per_data.update_layout(
+            title="Cluster Density (per 1000 data)",
+            xaxis_title="Total Data Processed",
+            yaxis_title="Clusters / 1000 data",
+            height=400
+        )
+        
+        st.plotly_chart(fig_cluster_per_data, use_container_width=True)
+        
+        # Warning jika over-segmentation
+        latest_density = metrics_df['cluster_per_1k'].iloc[-1]
+        if latest_density > 100:
+            st.error(f"⚠️ **Over-segmentation detected!** {latest_density:.1f} clusters per 1K data")
+        elif latest_density > 50:
+            st.warning(f"⚠️ **Watch out!** {latest_density:.1f} clusters per 1K data")
+        else:
+            st.success(f"✅ **Good density**: {latest_density:.1f} clusters per 1K data")
+    
+    st.markdown("---")
+    
+    # === 2. EVALUATION METRICS OVER TIME ===
+    st.markdown("#### 📉 Evaluasi Metrik Over Time")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Silhouette Score over time
+        fig_silhouette = go.Figure()
+        
+        fig_silhouette.add_trace(go.Scatter(
+            x=metrics_df['timestamp'],
+            y=metrics_df['silhouette'],
+            mode='lines+markers',
+            name='Silhouette',
+            line=dict(color='#8b5cf6', width=2),
+            marker=dict(size=6),
+            fill='tonexty',
+            fillcolor='rgba(139, 92, 246, 0.1)'
+        ))
+        
+        # Threshold lines
+        fig_silhouette.add_hline(y=0.5, line_dash="dash", line_color="green", 
+                                annotation_text="Good (>0.5)", annotation_position="right")
+        fig_silhouette.add_hline(y=0.25, line_dash="dash", line_color="orange", 
+                                annotation_text="Fair (>0.25)", annotation_position="right")
+        
+        fig_silhouette.update_layout(
+            title="Silhouette Score Over Time",
+            xaxis_title="Waktu",
+            yaxis_title="Silhouette Score",
+            height=400,
+            hovermode='x unified'
+        )
+        
+        st.plotly_chart(fig_silhouette, use_container_width=True)
+        
+        # Statistik Silhouette
+        st.markdown("**📊 Silhouette Statistics:**")
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            st.metric("Min", f"{metrics_df['silhouette'].min():.3f}")
+        with col_b:
+            st.metric("Max", f"{metrics_df['silhouette'].max():.3f}")
+        with col_c:
+            st.metric("Avg", f"{metrics_df['silhouette'].mean():.3f}")
+    
+    with col2:
+        # Davies-Bouldin Index over time
+        fig_dbi = go.Figure()
+        
+        fig_dbi.add_trace(go.Scatter(
+            x=metrics_df['timestamp'],
+            y=metrics_df['davies_bouldin'],
+            mode='lines+markers',
+            name='DBI',
+            line=dict(color='#ef4444', width=2),
+            marker=dict(size=6),
+            fill='tonexty',
+            fillcolor='rgba(239, 68, 68, 0.1)'
+        ))
+        
+        # Threshold lines
+        fig_dbi.add_hline(y=1.0, line_dash="dash", line_color="green", 
+                         annotation_text="Excellent (<1.0)", annotation_position="right")
+        fig_dbi.add_hline(y=2.0, line_dash="dash", line_color="orange", 
+                         annotation_text="Acceptable (<2.0)", annotation_position="right")
+        
+        fig_dbi.update_layout(
+            title="Davies-Bouldin Index Over Time",
+            xaxis_title="Waktu",
+            yaxis_title="DBI (lower is better)",
+            height=400,
+            hovermode='x unified'
+        )
+        
+        st.plotly_chart(fig_dbi, use_container_width=True)
+        
+        # Statistik DBI
+        st.markdown("**📊 DBI Statistics:**")
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            st.metric("Min", f"{metrics_df['davies_bouldin'].min():.3f}")
+        with col_b:
+            st.metric("Max", f"{metrics_df['davies_bouldin'].max():.3f}")
+        with col_c:
+            st.metric("Avg", f"{metrics_df['davies_bouldin'].mean():.3f}")
+    
+    st.markdown("---")
+    
+    # === 3. COMBINED METRICS VIEW ===
+    st.markdown("#### 📊 Combined Metrics View")
+    
+    fig_combined = go.Figure()
+    
+    # Normalize metrics untuk comparison
+    metrics_df['silhouette_norm'] = (metrics_df['silhouette'] - metrics_df['silhouette'].min()) / (metrics_df['silhouette'].max() - metrics_df['silhouette'].min())
+    metrics_df['dbi_norm'] = 1 - ((metrics_df['davies_bouldin'] - metrics_df['davies_bouldin'].min()) / (metrics_df['davies_bouldin'].max() - metrics_df['davies_bouldin'].min()))
+    metrics_df['cluster_norm'] = (metrics_df['active_clusters'] - metrics_df['active_clusters'].min()) / (metrics_df['active_clusters'].max() - metrics_df['active_clusters'].min())
+    
+    fig_combined.add_trace(go.Scatter(
+        x=metrics_df['timestamp'],
+        y=metrics_df['silhouette_norm'],
+        mode='lines',
+        name='Silhouette (norm)',
+        line=dict(color='#8b5cf6', width=2)
+    ))
+    
+    fig_combined.add_trace(go.Scatter(
+        x=metrics_df['timestamp'],
+        y=metrics_df['dbi_norm'],
+        mode='lines',
+        name='DBI Inverse (norm)',
+        line=dict(color='#ef4444', width=2)
+    ))
+    
+    fig_combined.add_trace(go.Scatter(
+        x=metrics_df['timestamp'],
+        y=metrics_df['cluster_norm'],
+        mode='lines',
+        name='Cluster Count (norm)',
+        line=dict(color='#3b82f6', width=2, dash='dash')
+    ))
+    
+    fig_combined.update_layout(
+        title="Normalized Metrics Comparison (0-1 scale)",
+        xaxis_title="Waktu",
+        yaxis_title="Normalized Value",
+        height=400,
+        hovermode='x unified',
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    st.plotly_chart(fig_combined, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # === 4. MERGE HISTORY ===
+    if merge_df is not None and not merge_df.empty:
+        st.markdown("#### 🔀 Merge History")
+        
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Merge events over time
+            fig_merge = go.Figure()
+            
+            # Count merges per hour
+            merge_df['hour'] = merge_df['merge_timestamp'].dt.floor('H')
+            merge_counts = merge_df.groupby('hour').size().reset_index(name='merge_count')
+            
+            fig_merge.add_trace(go.Bar(
+                x=merge_counts['hour'],
+                y=merge_counts['merge_count'],
+                marker=dict(color='#f59e0b'),
+                name='Merge Events'
+            ))
+            
+            fig_merge.update_layout(
+                title="Merge Events Over Time",
+                xaxis_title="Waktu",
+                yaxis_title="Jumlah Merge",
+                height=350
+            )
+            
+            st.plotly_chart(fig_merge, use_container_width=True)
+        
+        with col2:
+            st.markdown("**📊 Merge Statistics:**")
+            st.metric("Total Merges", len(merge_df))
+            st.metric("Avg Threshold", f"{merge_df['threshold_used'].mean():.3f}")
+            
+            # Most merged cluster
+            most_merged = merge_df['old_cluster_id'].value_counts().head(3)
+            st.markdown("**Top Merged Clusters:**")
+            for cluster, count in most_merged.items():
+                st.text(f"Cluster {cluster}: {count}x merged")
+    
+    st.markdown("---")
+    
+    # === 5. TREND ANALYSIS ===
+    st.markdown("#### 📈 Trend Analysis & Insights")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # Cluster growth trend
+        recent_clusters = metrics_df['active_clusters'].tail(10).mean()
+        old_clusters = metrics_df['active_clusters'].head(10).mean()
+        cluster_trend = ((recent_clusters - old_clusters) / old_clusters) * 100
+        
+        st.metric(
+            "Cluster Growth Trend",
+            f"{recent_clusters:.1f}",
+            f"{cluster_trend:+.1f}%",
+            delta_color="inverse" if cluster_trend > 20 else "normal"
+        )
+        
+        if cluster_trend > 20:
+            st.warning("⚠️ Rapid cluster growth detected!")
+        elif cluster_trend < -20:
+            st.info("ℹ️ Clusters consolidating")
+        else:
+            st.success("✅ Stable cluster count")
+    
+    with col2:
+        # Quality trend
+        recent_silhouette = metrics_df['silhouette'].tail(10).mean()
+        old_silhouette = metrics_df['silhouette'].head(10).mean()
+        quality_trend = ((recent_silhouette - old_silhouette) / abs(old_silhouette)) * 100
+        
+        st.metric(
+            "Quality Trend",
+            f"{recent_silhouette:.3f}",
+            f"{quality_trend:+.1f}%"
+        )
+        
+        if quality_trend < -10:
+            st.error("❌ Quality declining!")
+        elif quality_trend > 10:
+            st.success("✅ Quality improving!")
+        else:
+            st.info("➡️ Quality stable")
+    
+    with col3:
+        # Data efficiency
+        total_data = metrics_df['total_data'].max()
+        final_clusters = metrics_df['active_clusters'].iloc[-1]
+        data_per_cluster = total_data / final_clusters if final_clusters > 0 else 0
+        
+        st.metric(
+            "Data per Cluster",
+            f"{data_per_cluster:.0f}",
+            "points/cluster"
+        )
+        
+        if data_per_cluster < 50:
+            st.warning("⚠️ Clusters too small")
+        elif data_per_cluster > 500:
+            st.warning("⚠️ Clusters too large")
+        else:
+            st.success("✅ Good distribution")
+
+
 # Dashboard UI utama
 def update_dashboard():
-    st.title(" Dashboard Monitoring Model Clustering Online")
-    st.markdown("Real-time Customer Segmentation dengan Interpretasi Bisnis")
+    st.title(" Dashboard Monitoring Model Data Stram")
+
     
     # Status Pipeline
     render_pipeline_status()
@@ -461,9 +844,12 @@ def update_dashboard():
     
 
     # Tab organization
-    tab1, tab2, tab3 = st.tabs(["Cluster Visualization", "Business Insights", "Cluster Profiles"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Cluster Visualization", 
+        "Business Insights", 
+        "Cluster Profiles",
+        "Growth Monitoring"])
     
-
     
     with tab1:
         st.subheader("2D Cluster Visualization (PCA)")
@@ -566,9 +952,59 @@ def update_dashboard():
         
         st.dataframe(cluster_sample[display_cols], use_container_width=True)
 
+
+    with tab4:
+        st.subheader("📈 Cluster Growth & Evaluation Monitoring")
+        st.markdown("Track pertumbuhan cluster dan evaluasi metrik dari waktu ke waktu")
+        
+        # Load monitoring data
+        with st.spinner("🔄 Loading monitoring data..."):
+            metrics_history = load_cluster_growth_data()
+            merge_history = load_merge_history()
+        
+        if metrics_history is not None and not metrics_history.empty:
+            # Filter options
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                # Time range filter
+                time_range = st.selectbox(
+                    "Time Range",
+                    ["All Time", "Last 24 Hours", "Last 7 Days", "Last 30 Days"],
+                    index=0
+                )
+            
+            with col2:
+                # Data points to show
+                show_points = st.number_input(
+                    "Show Last N Points",
+                    min_value=10,
+                    max_value=len(metrics_history),
+                    value=min(100, len(metrics_history)),
+                    step=10
+                )
+            
+            # Apply filters
+            if time_range != "All Time":
+                now = datetime.utcnow()
+                if time_range == "Last 24 Hours":
+                    cutoff = now - timedelta(hours=24)
+                elif time_range == "Last 7 Days":
+                    cutoff = now - timedelta(days=7)
+                else:  # Last 30 Days
+                    cutoff = now - timedelta(days=30)
+                
+                metrics_filtered = metrics_history[metrics_history['timestamp'] >= cutoff]
+            else:
+                metrics_filtered = metrics_history.tail(show_points)
+            
+            # Render monitoring
+            render_cluster_growth_monitoring(metrics_filtered, merge_history)
+        else:
+            st.warning("Data Monitoring OML Tidak ditenumkan didatabase. Jalankan sistem terlebih dahulu.")
+
 # Main Loop
 if __name__ == "__main__":
-    st_autorefresh(interval=150000, key="dashboard_refresh")
+    # st_autorefresh(interval=150000, key="dashboard_refresh")
     update_dashboard()
     
     st.sidebar.markdown("---")
