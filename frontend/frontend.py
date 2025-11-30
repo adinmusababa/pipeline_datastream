@@ -14,7 +14,7 @@ import uuid
 st.set_page_config(
     page_title="Dashboard Clustering",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # STYLING
@@ -41,42 +41,42 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# SIDEBAR CONTROLS
-st.sidebar.title("Pengaturan Visualisasi")
+# # SIDEBAR CONTROLS
+# st.sidebar.title("Pengaturan Visualisasi")
 
-max_data_points = st.sidebar.number_input(
-    "Jumlah Data Maksimal", 
-    min_value=1000, 
-    max_value=50000, 
-    value=10000, 
-    step=1000,
-    help="Jumlah data yang akan ditampilkan dalam visualisasi"
-)
+# max_data_points = st.sidebar.number_input(
+#     "Jumlah Data Maksimal", 
+#     min_value=1000, 
+#     max_value=50000, 
+#     value=10000, 
+#     step=1000,
+#     help="Jumlah data yang akan ditampilkan dalam visualisasi"
+# )
 
-point_size = st.sidebar.slider(
-    "Ukuran Titik", 
-    min_value=2, 
-    max_value=10, 
-    value=3,
-    help="Ukuran marker pada scatter plot"
-)
+# point_size = st.sidebar.slider(
+#     "Ukuran Titik", 
+#     min_value=2, 
+#     max_value=10, 
+#     value=3,
+#     help="Ukuran marker pada scatter plot"
+# )
 
-show_labels = st.sidebar.checkbox(
-    "Tampilkan Label Cluster", 
-    value=True,
-    help="Menampilkan legend cluster pada visualisasi"
-)
+# show_labels = st.sidebar.checkbox(
+#     "Tampilkan Label Cluster", 
+#     value=True,
+#     help="Menampilkan legend cluster pada visualisasi"
+# )
 
-refresh_interval = st.sidebar.selectbox(
-    "Auto-Refresh Interval",
-    options=[15, 30, 60, 120],
-    index=1,
-    format_func=lambda x: f"{x} detik",
-    help="Interval refresh otomatis dashboard"
-)
+# refresh_interval = st.sidebar.selectbox(
+#     "Auto-Refresh Interval",
+#     options=[15, 30, 60, 120],
+#     index=1,
+#     format_func=lambda x: f"{x} detik",
+#     help="Interval refresh otomatis dashboard"
+# )
 
-st.sidebar.markdown("---")
-st.sidebar.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S')}")
+# st.sidebar.markdown("---")
+# st.sidebar.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S')}")
 
 
 # DATABASE CONNECTION
@@ -211,10 +211,10 @@ def apply_pca(df):
         df['pca1'] = pca_result[:, 0]
         df['pca2'] = pca_result[:, 1]
         
-        # Info explained variance
-        explained_var = pca.explained_variance_ratio_
-        variance_info = f"Explained Variance: PC1={explained_var[0]:.1%}, PC2={explained_var[1]:.1%}"
-        st.caption(variance_info)
+        # # Info explained variance
+        # explained_var = pca.explained_variance_ratio_
+        # variance_info = f"Explained Variance: PC1={explained_var[0]:.1%}, PC2={explained_var[1]:.1%}"
+        # st.caption(variance_info)
         
         return df
     
@@ -345,34 +345,115 @@ def classify_segment(pct, subset, size, total_size):
             'color': '#2563eb'
         }
 
+# Fisuaslisasi control
+def render_visualization_controls(df):
+    """
+    Render kontrol visualisasi di atas chart
+    Returns: dict dengan settings yang dipilih user
+    """
+    st.markdown("### Pengaturan Visualisasi")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        max_points = st.number_input(
+            "Jumlah Data Maksimal",
+            min_value=1000,
+            max_value=50000,
+            value=10000,
+            step=1000,
+            help="Jumlah data yang ditampilkan"
+        )
+    
+    with col2:
+        point_size = st.slider(
+            "Ukuran Titik",
+            min_value=2,
+            max_value=10,
+            value=3,
+            help="Ukuran marker pada plot"
+        )
+    
+    with col3:
+        show_legend = st.checkbox(
+            "Tampilkan Legend",
+            value=True,
+            help="Menampilkan legend cluster"
+        )
+    
+    # Filter Cluster ID
+    st.markdown("#### Filter Cluster")
+    
+    all_clusters = sorted(df['cluster_id'].unique())
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        selected_clusters = st.multiselect(
+            "Pilih Cluster ID yang akan ditampilkan",
+            options=all_clusters,
+            default=all_clusters,
+            help="Kosongkan untuk menampilkan semua cluster"
+        )
+    
+    with col2:
+        st.write("")  # Spacer
+        st.write("")  # Spacer
+        if st.button("Reset Filter", use_container_width=True):
+            st.rerun()
+    
+    # Info
+    if selected_clusters:
+        n_selected = len(selected_clusters)
+        n_total = len(all_clusters)
+        st.caption(f"Menampilkan {n_selected} dari {n_total} cluster")
+    else:
+        st.warning("Pilih minimal 1 cluster untuk ditampilkan")
+    
+    st.markdown("---")
+    
+    return {
+        'max_points': max_points,
+        'point_size': point_size,
+        'show_legend': show_legend,
+        'selected_clusters': selected_clusters if selected_clusters else all_clusters
+    }
+
 
 # VISUALIZATION FUNCTIONS
-def create_cluster_plot(df):
+def create_cluster_plot(df, settings):  
     """Buat scatter plot 2D hasil PCA"""
+    
+    # Filter data berdasarkan selected clusters
+    df_filtered = df[df['cluster_id'].isin(settings['selected_clusters'])]
+    
+    if df_filtered.empty:
+        st.warning("Tidak ada data untuk cluster yang dipilih")
+        return None
+    
     fig = px.scatter(
-        df,
+        df_filtered,
         x='pca1',
         y='pca2',
         color='cluster_id',
-        hover_data=['User ID', 'Item ID', 'Behavior type', 'Category ID'] if 'User ID' in df.columns else None,
-        title=f"Visualisasi Cluster (PCA 2D) - {len(df):,} Data Points",
+        hover_data=['User ID', 'Item ID', 'Behavior type', 'Category ID'] if 'User ID' in df_filtered.columns else None,
+        title=f"Visualisasi Cluster (PCA 2D) - {len(df_filtered):,} Data Points",
         labels={'pca1': 'Principal Component 1', 'pca2': 'Principal Component 2'},
         color_continuous_scale='Viridis',
         opacity=0.6
     )
     
-    fig.update_traces(marker=dict(size=point_size))
+    fig.update_traces(marker=dict(size=settings['point_size']))  # ✅ DARI SETTINGS
     
     fig.update_layout(
         height=600,
-        showlegend=show_labels,
+        showlegend=settings['show_legend'],  # ✅ DARI SETTINGS
         plot_bgcolor='white',
         xaxis=dict(showgrid=True, gridcolor='#e5e7eb'),
         yaxis=dict(showgrid=True, gridcolor='#e5e7eb')
     )
     
     return fig
-
 
 def create_growth_chart(metrics_df):
     """Chart pertumbuhan jumlah cluster"""
@@ -488,20 +569,27 @@ def render_status_section(metrics, latency):
                 f"{int(time_diff.total_seconds())}s ago"
             )
 
-
-def render_cluster_analysis(df_pca, interpretations):
+def render_cluster_analysis(df_pca, interpretations, settings):  
     """Render analisis cluster dan visualisasi"""
+    
+    # ✅ TAMBAHKAN KONTROL DI ATAS
+    visualization_settings = render_visualization_controls(df_pca)
     
     # Visualisasi
     st.subheader("Visualisasi Cluster")
-    fig = create_cluster_plot(df_pca)
-    st.plotly_chart(fig, use_container_width=True)
+    fig = create_cluster_plot(df_pca, visualization_settings)  
     
-    # Distribusi cluster
+    if fig:  # ✅ CEK JIKA TIDAK NONE
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Filter data untuk distribusi berdasarkan selected clusters
+    df_filtered = df_pca[df_pca['cluster_id'].isin(visualization_settings['selected_clusters'])]
+    
+    # Distribusi cluster (gunakan df_filtered)
     col1, col2 = st.columns(2)
     
     with col1:
-        cluster_sizes = df_pca['cluster_id'].value_counts().sort_index()
+        cluster_sizes = df_filtered['cluster_id'].value_counts().sort_index()  
         fig_bar = px.bar(
             x=cluster_sizes.index,
             y=cluster_sizes.values,
@@ -518,6 +606,9 @@ def render_cluster_analysis(df_pca, interpretations):
             hole=0.4
         )
         st.plotly_chart(fig_pie, use_container_width=True)
+    
+    return visualization_settings  
+
 
 
 def render_business_insights(interpretations):
@@ -623,34 +714,34 @@ def render_monitoring(metrics_df, merge_df):
         fig.add_hline(y=2.0, line_dash="dash", line_color="orange", annotation_text="Acceptable")
         st.plotly_chart(fig, use_container_width=True)
     
-    # Merge history
-    if merge_df is not None and not merge_df.empty:
-        st.markdown("---")
-        st.subheader("Riwayat Merge")
+    # # Merge history
+    # if merge_df is not None and not merge_df.empty:
+    #     st.markdown("---")
+    #     st.subheader("Riwayat Merge")
         
-        col1, col2 = st.columns([3, 1])
+    #     col1, col2 = st.columns([3, 1])
         
-        with col1:
-            merge_df['hour'] = merge_df['merge_timestamp'].dt.floor('H')
-            merge_counts = merge_df.groupby('hour').size().reset_index(name='count')
+    #     with col1:
+    #         merge_df['hour'] = merge_df['merge_timestamp'].dt.floor('H')
+    #         merge_counts = merge_df.groupby('hour').size().reset_index(name='count')
             
-            fig = go.Figure()
-            fig.add_trace(go.Bar(
-                x=merge_counts['hour'],
-                y=merge_counts['count'],
-                marker_color='#ea580c'
-            ))
-            fig.update_layout(
-                title="Merge Events Over Time",
-                xaxis_title="Waktu",
-                yaxis_title="Jumlah Merge",
-                height=300
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    #         fig = go.Figure()
+    #         fig.add_trace(go.Bar(
+    #             x=merge_counts['hour'],
+    #             y=merge_counts['count'],
+    #             marker_color='#ea580c'
+    #         ))
+    #         fig.update_layout(
+    #             title="Merge Events Over Time",
+    #             xaxis_title="Waktu",
+    #             yaxis_title="Jumlah Merge",
+    #             height=300
+    #         )
+    #         st.plotly_chart(fig, use_container_width=True)
         
-        with col2:
-            st.metric("Total Merges", len(merge_df))
-            st.metric("Avg Threshold", f"{merge_df['threshold_used'].mean():.3f}")
+    #     with col2:
+    #         st.metric("Total Merges", len(merge_df))
+    #         st.metric("Avg Threshold", f"{merge_df['threshold_used'].mean():.3f}")
 
 
 # MAIN APP
@@ -680,21 +771,21 @@ def main():
     ])
     
     with tab1:
-        with st.spinner("Memuat data cluster..."):
-            df = load_cluster_data(max_data_points)
-        
-        if df is not None and not df.empty:
-            # Handle list cluster_id
-            if isinstance(df.loc[0, 'cluster_id'], list):
-                df['cluster_id'] = df['cluster_id'].apply(
-                    lambda x: x[0] if isinstance(x, list) and len(x) > 0 else x
-                )
+            with st.spinner("Memuat data cluster..."):
+                df = load_cluster_data(50000) 
             
-            df_pca = apply_pca(df)
-            
-            if df_pca is not None:
-                interpretations = analyze_cluster_behavior(df_pca)
-                render_cluster_analysis(df_pca, interpretations)
+            if df is not None and not df.empty:
+                # Handle list cluster_id
+                if isinstance(df.loc[0, 'cluster_id'], list):
+                    df['cluster_id'] = df['cluster_id'].apply(
+                        lambda x: x[0] if isinstance(x, list) and len(x) > 0 else x
+                    )
+                
+                df_pca = apply_pca(df)
+                
+                if df_pca is not None:
+                    interpretations = analyze_cluster_behavior(df_pca)
+                    viz_settings = render_cluster_analysis(df_pca, interpretations, None)
     
     with tab2:
         if df is not None and df_pca is not None:
@@ -773,8 +864,8 @@ def main():
 
 
 if __name__ == "__main__":
-    # # Auto-refresh
-    # from streamlit_autorefresh import st_autorefresh
-    # st_autorefresh(interval=refresh_interval * 1000, key="refresh")
+    # Auto-refresh (30 detik)
+    from streamlit_autorefresh import st_autorefresh
+    st_autorefresh(interval=90000, key="refresh") 
     
     main()
