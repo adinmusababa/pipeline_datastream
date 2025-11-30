@@ -100,11 +100,11 @@ class modelProducer:
                     batch.append(document)
                     
                     if len(batch) >= batch_size:
-                        # ✅ Process batch dengan reconnection handling
+                        # Process batch dengan reconnection handling
                         published_data = self.prosess_batch(batch, channel, db)
                         total_published += published_data
                         
-                        # ✅ Check if connection closed during processing
+                        # Check if connection closed during processing
                         if published_data < len(batch):
                             self.logger.warning(f"⚠️  Incomplete batch ({published_data}/{len(batch)}), reconnecting...")
                             
@@ -117,11 +117,11 @@ class modelProducer:
                             # Reconnect
                             connection, channel = self.setup_rabitmq(host='localhost', queue=self.topic)
                             if connection is None or channel is None:
-                                self.logger.error("❌ Reconnection failed!")
+                                self.logger.error("Reconnection failed!")
                                 time.sleep(5)
                                 continue
                             
-                            self.logger.info("✅ Reconnected to RabbitMQ")
+                            self.logger.info("Reconnected to RabbitMQ")
                         
                         # Update checkpoint
                         last_processed_id = batch[-1]["_id"]
@@ -191,11 +191,11 @@ class modelProducer:
 
             channel.basic_qos(prefetch_count=1)
             
-            self.logger.info("✅ Koneksi ke RabbitMQ berhasil.")
+            self.logger.info(" Koneksi ke RabbitMQ berhasil.")
             return connection, channel
             
         except Exception as e:
-            self.logger.error(f"❌ Gagal menghubungkan ke RabbitMQ: {e}")
+            self.logger.error(f" Gagal menghubungkan ke RabbitMQ: {e}")
             return None, None\
             
     # fungsi proses batch data
@@ -207,7 +207,7 @@ class modelProducer:
         try:
             published_count = 0
             
-            self.logger.info(f"📦 Processing batch: {len(batch)} documents")
+            self.logger.info(f" Processing batch: {len(batch)} documents")
             
             for idx, document in enumerate(batch):
                 try:
@@ -223,9 +223,9 @@ class modelProducer:
                     # Streaming preprocessing
                     features = self.preprocessor.fit_transform_one(raw_data)
                     
-                    # ✅ Check if features are valid (not all zeros)
+                    # Check if features are valid (not all zeros)
                     if all(f == 0.0 for f in features):
-                        self.logger.warning(f"⚠️  All-zero features at idx {idx}, skipping...")
+                        self.logger.warning(f"All-zero features at idx {idx}, skipping...")
                         continue
                     
                     # Build message
@@ -244,11 +244,11 @@ class modelProducer:
                     
                     # Log first 3 messages
                     if published_count < 3:
-                        self.logger.info(f"📤 Message #{published_count+1}:")
+                        self.logger.info(f"   Message #{published_count+1}:")
                         self.logger.info(f"   Raw: {raw_data}")
                         self.logger.info(f"   Features: {features}")
                     
-                    # ✅ Publish dengan error handling
+                    # Publish dengan error handling
                     try:
                         channel.basic_publish(
                             exchange='',
@@ -259,17 +259,17 @@ class modelProducer:
                         published_count += 1
                         
                     except pika.exceptions.ConnectionClosed:
-                        self.logger.error("❌ RabbitMQ connection closed!")
+                        self.logger.error("RabbitMQ connection closed!")
                         # Return count untuk trigger reconnect
                         return published_count
                     
                     time.sleep(0.01)
                 
                 except Exception as e:
-                    self.logger.error(f"❌ Error processing document {idx}: {e}")
+                    self.logger.error(f"Error processing document {idx}: {e}")
                     continue
             
-            self.logger.info(f"✅ Batch complete: {published_count}/{len(batch)} messages published")
+            self.logger.info(f"Batch complete: {published_count}/{len(batch)} messages published")
             
             # Save preprocessor state
             if published_count > 0:
@@ -278,7 +278,7 @@ class modelProducer:
             return published_count
         
         except Exception as e:
-            self.logger.error(f"❌ Batch processing failed: {e}")
+            self.logger.error(f"Batch processing failed: {e}")
             import traceback
             self.logger.error(traceback.format_exc())
             return 0       

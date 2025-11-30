@@ -103,7 +103,6 @@ class ModelConsumer:
 
     
     def process_datapoint(self, message):
-        """Process satu data point dari queue"""
         try:
             original_id = message.get('metadata', {}).get('original_id')
 
