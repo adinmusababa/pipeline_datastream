@@ -256,7 +256,7 @@ def analyze_cluster_behavior(cluster_data):
     
     return results
 
-
+# fungsi interpretasi cluster
 def classify_segment(pct, subset, size, total_size):
     """Klasifikasi tipe segmen berdasarkan perilaku dominan"""
     buy = pct['buy']
@@ -270,7 +270,7 @@ def classify_segment(pct, subset, size, total_size):
     n_categories = subset['Category ID'].nunique() if 'Category ID' in subset.columns else 0
     
     # Logika klasifikasi
-    if buy > 15:
+    if buy > 20:
         return {
             'name': 'High-Value Buyers',
             'description': f'Konversi pembelian tinggi ({buy:.1f}%). Pengguna dengan transaksi aktif.',
@@ -295,7 +295,7 @@ def classify_segment(pct, subset, size, total_size):
                 f'Cart: {cart:.1f}%, Buy: {buy:.1f}%',
                 f'Gap konversi: {cart - buy:.1f}%'
             ],
-            'strategy': 'Email reminder, diskon khusus, free shipping',
+            'strategy': 'Email reminder, diskon khusus',
             'priority': 'HIGH',
             'color': '#ea580c'
         }
@@ -359,9 +359,9 @@ def render_visualization_controls(df):
         max_points = st.number_input(
             "Jumlah Data Maksimal",
             min_value=1000,
-            max_value=50000,
-            value=10000,
-            step=1000,
+            max_value=5000000000,
+            value=10000000,
+            step=0,
             help="Jumlah data yang ditampilkan"
         )
     
@@ -443,11 +443,11 @@ def create_cluster_plot(df, settings):
         opacity=0.6
     )
     
-    fig.update_traces(marker=dict(size=settings['point_size']))  # ✅ DARI SETTINGS
+    fig.update_traces(marker=dict(size=settings['point_size']))
     
     fig.update_layout(
         height=600,
-        showlegend=settings['show_legend'],  # ✅ DARI SETTINGS
+        showlegend=settings['show_legend'],  # 
         plot_bgcolor='white',
         xaxis=dict(showgrid=True, gridcolor='#e5e7eb'),
         yaxis=dict(showgrid=True, gridcolor='#e5e7eb')
@@ -571,15 +571,14 @@ def render_status_section(metrics, latency):
 
 def render_cluster_analysis(df_pca, interpretations, settings):  
     """Render analisis cluster dan visualisasi"""
-    
-    # ✅ TAMBAHKAN KONTROL DI ATAS
+
     visualization_settings = render_visualization_controls(df_pca)
     
     # Visualisasi
     st.subheader("Visualisasi Cluster")
     fig = create_cluster_plot(df_pca, visualization_settings)  
     
-    if fig:  # ✅ CEK JIKA TIDAK NONE
+    if fig:  # 
         st.plotly_chart(fig, use_container_width=True)
     
     # Filter data untuk distribusi berdasarkan selected clusters

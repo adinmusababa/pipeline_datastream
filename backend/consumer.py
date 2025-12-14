@@ -119,9 +119,9 @@ class ModelConsumer:
             self.model.learn_one(x)
             cluster_id = self.model.predict_one(x)
 
-            if cluster_id is None:
-                cluster_id = 0
-                logger.warning("Cluster ID was None, assigned to 0")
+            # if cluster_id is None:
+            #     cluster_id = 0
+            #     logger.warning("Cluster ID was None, assigned to 0")
 
             # Add to buffer
             true_label = message.get("label", None)
