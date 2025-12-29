@@ -211,16 +211,18 @@ class modelProducer:
             
             for idx, document in enumerate(batch):
                 try:
-                    # Extract raw data
+                    # Extract User ID sebelum preprocessing
+                    user_id = document.get('User ID')
+                    
+                    # Extract raw data (tanpa User ID untuk preprocessing)
                     raw_data = {
-                        'User ID': document.get('User ID'),
                         'Item ID': document.get('Item ID'),
                         'Category ID': document.get('Category ID'),
                         'Behavior type': document.get('Behavior type'),
                         'Timestamp': document.get('Timestamp')
                     }
                     
-                    # Streaming preprocessing
+                    # Streaming preprocessing (hanya non-User ID features)
                     features = self.preprocessor.fit_transform_one(raw_data)
                     
                     # Check if features are valid (not all zeros)
@@ -234,6 +236,7 @@ class modelProducer:
                         'timestamp': int(document['Timestamp']),
                         'metadata': {
                             'original_id': str(document.get('_id', '')),
+                            'user_id': user_id,  # User ID untuk database dan frontend
                             'behavior_type': document.get('Behavior type', ''),
                             'Item ID': int(document['Item ID']),
                             'Category ID': int(document['Category ID']),

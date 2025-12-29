@@ -114,7 +114,13 @@ def load_cluster_data(limit=10000):
         if not docs:
             return None
         
-        return pd.DataFrame(docs)
+        df = pd.DataFrame(docs)
+        
+        # Rename field untuk konsistensi dengan analisis
+        if 'user_id' in df.columns and 'User ID' not in df.columns:
+            df['User ID'] = df['user_id']
+        
+        return df
     
     except Exception as e:
         st.error(f"Error loading data: {e}")
@@ -222,23 +228,34 @@ def apply_pca(df):
         st.error(f"Error dalam PCA: {e}")
         return None
 
-
 def analyze_cluster_behavior(cluster_data):
-    """Analisis perilaku untuk setiap cluster"""
+    """
+    Analisis perilaku untuk setiap cluster berdasarkan user-level aggregation
+    """
     results = []
     
     for cluster_id in sorted(cluster_data['cluster_id'].unique()):
         subset = cluster_data[cluster_data['cluster_id'] == cluster_id]
-        size = len(subset)
         
-        # Hitung distribusi behavior
-        behavior_counts = Counter(subset['Behavior type'].dropna())
+        # ===== USER-LEVEL AGGREGATION =====
+        # Ambil behavior terakhir (final stage) per user
+        user_behaviors = subset.groupby('User ID').agg({
+            'Behavior type': 'last',  # Behavior terakhir dalam journey
+            'Item ID': 'nunique',      # Jumlah item dilihat
+            'Category ID': 'nunique',  # Jumlah kategori dieksplorasi
+            'timestamp': 'max'         # Waktu terakhir aktivitas
+        }).reset_index()
+        
+        size = len(user_behaviors)  # Jumlah UNIQUE USERS
+        
+        # Hitung distribusi behavior (user-level)
+        behavior_counts = Counter(user_behaviors['Behavior type'].dropna())
         total = sum(behavior_counts.values())
         
         if total == 0:
             continue
         
-        # Persentase tiap behavior
+        # Persentase berdasarkan JUMLAH USER
         pct = {
             'pv': (behavior_counts.get('pv', 0) / total) * 100,
             'fav': (behavior_counts.get('fav', 0) / total) * 100,
@@ -246,41 +263,95 @@ def analyze_cluster_behavior(cluster_data):
             'buy': (behavior_counts.get('buy', 0) / total) * 100
         }
         
+        # Hitung metrik tambahan per user
+        avg_items_per_user = user_behaviors['Item ID'].mean()
+        avg_categories_per_user = user_behaviors['Category ID'].mean()
+        
         # Klasifikasi segmen
-        segment = classify_segment(pct, subset, size, len(cluster_data))
+        segment = classify_segment(
+            pct, 
+            user_behaviors,  # Pass user_behaviors, bukan subset
+            size, 
+            len(cluster_data['User ID'].unique())  # Total unique users
+        )
+        
         segment['cluster_id'] = int(cluster_id)
         segment['size'] = size
         segment['percentages'] = pct
+        segment['avg_items_per_user'] = avg_items_per_user
+        segment['avg_categories_per_user'] = avg_categories_per_user
         
         results.append(segment)
     
     return results
 
+# def analyze_cluster_behavior(cluster_data):
+#     """Analisis perilaku untuk setiap cluster"""
+#     results = []
+    
+#     for cluster_id in sorted(cluster_data['cluster_id'].unique()):
+#         subset = cluster_data[cluster_data['cluster_id'] == cluster_id]
+#         size = len(subset)
+        
+#         # Hitung distribusi behavior
+#         behavior_counts = Counter(subset['Behavior type'].dropna())
+#         total = sum(behavior_counts.values())
+        
+#         if total == 0:
+#             continue
+        
+#         # Persentase tiap behavior
+#         pct = {
+#             'pv': (behavior_counts.get('pv', 0) / total) * 100,
+#             'fav': (behavior_counts.get('fav', 0) / total) * 100,
+#             'cart': (behavior_counts.get('cart', 0) / total) * 100,
+#             'buy': (behavior_counts.get('buy', 0) / total) * 100
+#         }
+        
+#         # Klasifikasi segmen
+#         segment = classify_segment(pct, subset, size, len(cluster_data))
+#         segment['cluster_id'] = int(cluster_id)
+#         segment['size'] = size
+#         segment['percentages'] = pct
+        
+#         results.append(segment)
+    
+#     return results
+
 # fungsi interpretasi cluster
-def classify_segment(pct, subset, size, total_size):
-    """Klasifikasi tipe segmen berdasarkan perilaku dominan"""
+def classify_segment(pct, user_behaviors, size, total_users):
+    """
+    Klasifikasi tipe segmen berdasarkan perilaku dominan
+    
+    Args:
+        pct: persentase behavior (user-level)
+        user_behaviors: DataFrame aggregated per user
+        size: jumlah user di cluster ini
+        total_users: total unique users di semua cluster
+    """
     buy = pct['buy']
     cart = pct['cart']
     fav = pct['fav']
     pv = pct['pv']
     
-    # Hitung statistik
-    n_users = subset['User ID'].nunique() if 'User ID' in subset.columns else 0
-    n_items = subset['Item ID'].nunique() if 'Item ID' in subset.columns else 0
-    n_categories = subset['Category ID'].nunique() if 'Category ID' in subset.columns else 0
+    # ✅ METRIK SUDAH BENAR (nunique di user_behaviors)
+    n_users = len(user_behaviors)
+    avg_items = user_behaviors['Item ID'].mean()
+    avg_categories = user_behaviors['Category ID'].mean()
     
-    # Logika klasifikasi
-    if buy > 20:
+    # Logika klasifikasi (tetap sama, tapi interpretasinya beda)
+    if buy > 15:
         return {
             'name': 'High-Value Buyers',
-            'description': f'Konversi pembelian tinggi ({buy:.1f}%). Pengguna dengan transaksi aktif.',
+            'description': f'{buy:.1f}% dari user di cluster ini melakukan pembelian. User dengan konversi tinggi.',
             'metrics': [
                 f'{n_users} unique users',
-                f'{n_categories} kategori produk',
-                f'Buy rate: {buy:.1f}%',
-                f'Proporsi: {(size/total_size)*100:.1f}% dari total'
+                f'Rata-rata {avg_items:.1f} item per user',
+                f'Eksplorasi {avg_categories:.1f} kategori per user',
+                f'Buy rate: {buy:.1f}% dari user',  # ✅ JELAS: persentase USER, bukan snapshot
+                f'Proporsi: {(size/total_users)*100:.1f}% dari total users'
             ],
-            'strategy': 'Loyalty program, cross-selling, VIP benefits',
+            'strategy': 'Loyalty program untuk repeat purchase, cross-selling berdasarkan history',
             'priority': 'HIGH',
             'color': '#dc2626'
         }
@@ -288,14 +359,15 @@ def classify_segment(pct, subset, size, total_size):
     elif cart > 20:
         return {
             'name': 'Cart Abandoners',
-            'description': f'Banyak item di keranjang ({cart:.1f}%) namun jarang checkout.',
+            'description': f'{cart:.1f}% dari user menambahkan item ke cart tapi tidak checkout. Potensi konversi tinggi.',
             'metrics': [
                 f'{n_users} users dengan abandoned cart',
-                f'{n_items} produk diminati',
-                f'Cart: {cart:.1f}%, Buy: {buy:.1f}%',
-                f'Gap konversi: {cart - buy:.1f}%'
+                f'Rata-rata {avg_items:.1f} item diminati per user',
+                f'Cart rate: {cart:.1f}% dari user',
+                f'Buy rate hanya: {buy:.1f}% dari user',
+                f'Gap konversi: {cart - buy:.1f}% perlu diaktivasi'
             ],
-            'strategy': 'Email reminder, diskon khusus',
+            'strategy': 'Email reminder dengan item di cart, diskon khusus, urgency tactics',
             'priority': 'HIGH',
             'color': '#ea580c'
         }
@@ -303,14 +375,14 @@ def classify_segment(pct, subset, size, total_size):
     elif fav > 20:
         return {
             'name': 'Wishlist Collectors',
-            'description': f'Sering menyimpan favorit ({fav:.1f}%) namun belum membeli.',
+            'description': f'{fav:.1f}% dari user menyimpan favorit. Dalam fase pertimbangan pembelian.',
             'metrics': [
-                f'{n_users} users dalam fase pertimbangan',
-                f'{n_items} items di wishlist',
-                f'Favorite rate: {fav:.1f}%',
-                'Potensi konversi tinggi'
+                f'{n_users} users dalam fase research',
+                f'Rata-rata {avg_items:.1f} item di wishlist per user',
+                f'Favorite rate: {fav:.1f}% dari user',
+                f'Belum convert ke purchase'
             ],
-            'strategy': 'Price alerts, limited offers, social proof',
+            'strategy': 'Price drop alerts, limited-time offers, social proof reviews',
             'priority': 'MEDIUM',
             'color': '#7c3aed'
         }
@@ -318,14 +390,14 @@ def classify_segment(pct, subset, size, total_size):
     elif pv > 60:
         return {
             'name': 'Window Shoppers',
-            'description': f'Dominan browsing ({pv:.1f}%). Engagement rendah.',
+            'description': f'{pv:.1f}% dari user hanya browsing. Engagement rendah, perlu aktivasi.',
             'metrics': [
                 f'{n_users} passive users',
-                f'{n_items} produk dilihat',
-                f'View rate: {pv:.1f}%',
-                f'Conversion: {buy:.1f}%'
+                f'Rata-rata {avg_items:.1f} item dilihat per user',
+                f'View-only rate: {pv:.1f}% dari user',
+                f'Conversion sangat rendah: {buy:.1f}%'
             ],
-            'strategy': 'Personalisasi, content marketing, retargeting',
+            'strategy': 'Personalisasi rekomendasi, content marketing, quiz interaktif',
             'priority': 'LOW',
             'color': '#059669'
         }
@@ -333,17 +405,105 @@ def classify_segment(pct, subset, size, total_size):
     else:
         return {
             'name': 'Balanced Engagers',
-            'description': f'Perilaku seimbang (Buy: {buy:.1f}%).',
+            'description': f'Perilaku seimbang. {buy:.1f}% dari user melakukan pembelian.',
             'metrics': [
-                f'{n_users} regular customers',
-                'Pola engagement seimbang',
-                f'Buy: {buy:.1f}%, Cart: {cart:.1f}%',
-                'Stable customer base'
+                f'{n_users} regular users',
+                f'Rata-rata {avg_items:.1f} item per user',
+                f'Balanced journey: Buy {buy:.1f}%, Cart {cart:.1f}%, Fav {fav:.1f}%',
+                'Stable customer base dengan growth potential'
             ],
-            'strategy': 'A/B testing, referral program, email nurturing',
+            'strategy': 'A/B testing untuk optimasi, referral program, gamification',
             'priority': 'MEDIUM',
             'color': '#2563eb'
         }
+    
+# def classify_segment(pct, subset, size, total_size):
+#     """Klasifikasi tipe segmen berdasarkan perilaku dominan"""
+#     buy = pct['buy']
+#     cart = pct['cart']
+#     fav = pct['fav']
+#     pv = pct['pv']
+    
+#     # Hitung statistik
+#     n_users = subset['User ID'].nunique() if 'User ID' in subset.columns else 0
+#     n_items = subset['Item ID'].nunique() if 'Item ID' in subset.columns else 0
+#     n_categories = subset['Category ID'].nunique() if 'Category ID' in subset.columns else 0
+    
+#     # Logika klasifikasi
+#     if buy > 20:
+#         return {
+#             'name': 'High-Value Buyers',
+#             'description': f'Konversi pembelian tinggi ({buy:.1f}%). Pengguna dengan transaksi aktif.',
+#             'metrics': [
+#                 f'{n_users} unique users',
+#                 f'{n_categories} kategori produk',
+#                 f'Buy rate: {buy:.1f}%',
+#                 f'Proporsi: {(size/total_size)*100:.1f}% dari total'
+#             ],
+#             'strategy': 'Loyalty program, cross-selling, VIP benefits',
+#             'priority': 'HIGH',
+#             'color': '#dc2626'
+#         }
+    
+#     elif cart > 20:
+#         return {
+#             'name': 'Cart Abandoners',
+#             'description': f'Banyak item di keranjang ({cart:.1f}%) namun jarang checkout.',
+#             'metrics': [
+#                 f'{n_users} users dengan abandoned cart',
+#                 f'{n_items} produk diminati',
+#                 f'Cart: {cart:.1f}%, Buy: {buy:.1f}%',
+#                 f'Gap konversi: {cart - buy:.1f}%'
+#             ],
+#             'strategy': 'Email reminder, diskon khusus',
+#             'priority': 'HIGH',
+#             'color': '#ea580c'
+#         }
+    
+#     elif fav > 20:
+#         return {
+#             'name': 'Wishlist Collectors',
+#             'description': f'Sering menyimpan favorit ({fav:.1f}%) namun belum membeli.',
+#             'metrics': [
+#                 f'{n_users} users dalam fase pertimbangan',
+#                 f'{n_items} items di wishlist',
+#                 f'Favorite rate: {fav:.1f}%',
+#                 'Potensi konversi tinggi'
+#             ],
+#             'strategy': 'Price alerts, limited offers, social proof',
+#             'priority': 'MEDIUM',
+#             'color': '#7c3aed'
+#         }
+    
+#     elif pv > 60:
+#         return {
+#             'name': 'Window Shoppers',
+#             'description': f'Dominan browsing ({pv:.1f}%). Engagement rendah.',
+#             'metrics': [
+#                 f'{n_users} passive users',
+#                 f'{n_items} produk dilihat',
+#                 f'View rate: {pv:.1f}%',
+#                 f'Conversion: {buy:.1f}%'
+#             ],
+#             'strategy': 'Personalisasi, content marketing, retargeting',
+#             'priority': 'LOW',
+#             'color': '#059669'
+#         }
+    
+#     else:
+#         return {
+#             'name': 'Balanced Engagers',
+#             'description': f'Perilaku seimbang (Buy: {buy:.1f}%).',
+#             'metrics': [
+#                 f'{n_users} regular customers',
+#                 'Pola engagement seimbang',
+#                 f'Buy: {buy:.1f}%, Cart: {cart:.1f}%',
+#                 'Stable customer base'
+#             ],
+#             'strategy': 'A/B testing, referral program, email nurturing',
+#             'priority': 'MEDIUM',
+#             'color': '#2563eb'
+#         }
 
 # Fisuaslisasi control
 def render_visualization_controls(df):
@@ -356,14 +516,24 @@ def render_visualization_controls(df):
     col1, col2, col3 = st.columns(3)
     
     with col1:
+        metrics = load_metrics()
+        if metrics:
+            total_data = metrics.get('total_data', 0)
+        else:
+            total_data = 0 
+
+        default_value = min(10000, total_data) if total_data > 0 else 1000
+
         max_points = st.number_input(
             "Jumlah Data Maksimal",
             min_value=1000,
-            max_value=5000000000,
-            value=10000000,
-            step=0,
+            max_value=total_data if total_data > 0 else 1000,
+            value=default_value,
+            step=1,
             help="Jumlah data yang ditampilkan"
+
         )
+
     
     with col2:
         point_size = st.slider(
@@ -437,7 +607,7 @@ def create_cluster_plot(df, settings):
         y='pca2',
         color='cluster_id',
         hover_data=['User ID', 'Item ID', 'Behavior type', 'Category ID'] if 'User ID' in df_filtered.columns else None,
-        title=f"Visualisasi Cluster (PCA 2D) - {len(df_filtered):,} Data Points",
+        # title=f"Visualisasi Cluster (PCA 2D) - {len(df_filtered):,} Data Points",
         labels={'pca1': 'Principal Component 1', 'pca2': 'Principal Component 2'},
         color_continuous_scale='Viridis',
         opacity=0.6
@@ -560,14 +730,39 @@ def render_status_section(metrics, latency):
             )
         
         with col7:
+            def humanize_timedelta(td):
+                seconds = int(td.total_seconds())
+                if seconds < 60:
+                    return f"{seconds}s ago"
+                elif seconds < 3600:  # kurang dari 1 jam
+                    minutes = seconds // 60
+                    return f"{minutes}m ago"
+                elif seconds < 86400:  # kurang dari 24 jam
+                    hours = seconds // 3600
+                    return f"{hours}h ago"
+                else:
+                    days = seconds // 86400
+                    return f"{days}d ago"
+
+            # penggunaan
             last_update = metrics['timestamp']
             if isinstance(last_update, str):
                 last_update = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+
             time_diff = datetime.utcnow() - last_update
+
             st.metric(
                 "Last Update",
-                f"{int(time_diff.total_seconds())}s ago"
+                humanize_timedelta(time_diff)
             )
+            # last_update = metrics['timestamp']
+            # if isinstance(last_update, str):
+            #     last_update = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+            # time_diff = datetime.utcnow() - last_update
+            # st.metric(
+            #     "Last Update",
+            #     f"{int(time_diff.total_seconds())}s ago"
+            # )
 
 def render_cluster_analysis(df_pca, interpretations, settings):  
     """Render analisis cluster dan visualisasi"""
@@ -613,6 +808,7 @@ def render_cluster_analysis(df_pca, interpretations, settings):
 def render_business_insights(interpretations):
     """Render interpretasi bisnis"""
     st.subheader("Analisis Segmen Bisnis")
+    st.text('catatan: Interpretasi ini adalah Karakteristik Dominan dari cluster, bukan segmentasi eksklusif.')
     
     # Sort by priority
     priority_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
@@ -836,11 +1032,14 @@ def main():
                     ["Semua", "24 Jam Terakhir", "7 Hari Terakhir", "30 Hari Terakhir"]
                 )
             with col2:
+
                 show_n = st.number_input(
                     "Tampilkan N Data Terakhir",
                     min_value=10,
+                    # max_value=total_data if total_data > 0 else 1000,
                     max_value=len(metrics_history),
-                    value=min(100, len(metrics_history))
+                    value=min(100, len(metrics_history))               
+                
                 )
             
             # Apply filter
