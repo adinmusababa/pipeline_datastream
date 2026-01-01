@@ -1,12 +1,8 @@
 import pika
 import time
-import pandas as pd
-import numpy as np
 from pymongo import MongoClient
 import logging
 import json
-from sklearn.preprocessing import OrdinalEncoder, StandardScaler, MinMaxScaler
-import sys
 
 from modelPreprocessing import StreamPreprocessor
 
@@ -16,11 +12,8 @@ class modelProducer:
         self.topic = topic
         self.preprocessor = StreamPreprocessor.load("models/preprocessor.pkl")
     
-        # collections untuk cekpoint
         self.checkpoint_collection = "checkpoint_producer"
 
-        # logging
-        # configure logging with timestamp and level
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -45,6 +38,7 @@ class modelProducer:
                 host='localhost',
                 queue=self.topic
             )
+            
             if connection is None or channel is None:
                 self.logger.error("Koneksi ke RabitMQ gagal. Menghentikan proses.")
                 client.close()
@@ -78,63 +72,62 @@ class modelProducer:
                 
                 self.logger.info(f"Sisa data untuk diproses: {remaining_count}")
 
-                # # proses data dalam batch
-                # cursor = collection.find(query).sort("_id", 1)
-                # batch = []
-
-                # for document in cursor:
-                #     batch.append(document)
-                #     if len(batch) >= batch_size:
-                #         bublised_data = self.prosess_batch(batch, channel, db)
-                #         total_published += bublised_data
-
-                #         # update checkpoint
-                #         last_processed_id = batch[-1]["_id"]
-                #         self.save_checkpoint(db, last_processed_id, total_published)
-                        
-                #         batch = []
                 cursor = collection.find(query).sort("_id", 1)
                 batch = []
 
-                for document in cursor:
-                    batch.append(document)
+                try:
+                    for document in cursor:
+                        batch.append(document)
+                        
+                        if len(batch) >= batch_size:
+                            # Process batch dengan reconnection handling
+                            published_data = self.prosess_batch(batch, channel, db)
+                            total_published += published_data
+                            
+                            # Check if connection closed during processing
+                            if published_data < len(batch):
+                                self.logger.warning(f"Incomplete batch ({published_data}/{len(batch)}), reconnecting...")
+                                
+                                # Close old connection
+                                try:
+                                    connection.close()
+                                except:
+                                    pass
+                                
+                                # Reconnect
+                                connection, channel = self.setup_rabitmq(host='localhost', queue=self.topic)
+                                if connection is None or channel is None:
+                                    self.logger.error("Reconnection failed!")
+                                    time.sleep(5)
+                                    continue
+                                
+                                self.logger.info("Reconnected to RabbitMQ")
+                            
+                            # Update checkpoint
+                            last_processed_id = batch[-1]["_id"]
+                            self.save_checkpoint(db, last_processed_id, total_published)
+                            
+                            batch = []
                     
-                    if len(batch) >= batch_size:
-                        # Process batch dengan reconnection handling
-                        published_data = self.prosess_batch(batch, channel, db)
-                        total_published += published_data
-                        
-                        # Check if connection closed during processing
-                        if published_data < len(batch):
-                            self.logger.warning(f"⚠️  Incomplete batch ({published_data}/{len(batch)}), reconnecting...")
-                            
-                            # Close old connection
-                            try:
-                                connection.close()
-                            except:
-                                pass
-                            
-                            # Reconnect
-                            connection, channel = self.setup_rabitmq(host='localhost', queue=self.topic)
-                            if connection is None or channel is None:
-                                self.logger.error("Reconnection failed!")
-                                time.sleep(5)
-                                continue
-                            
-                            self.logger.info("Reconnected to RabbitMQ")
-                        
-                        # Update checkpoint
+                    # proses sisa data dalam batch
+                    if batch:
+                        publised = self.prosess_batch(batch, channel, db)
+                        total_published += publised
                         last_processed_id = batch[-1]["_id"]
                         self.save_checkpoint(db, last_processed_id, total_published)
-                        
-                        batch = []                
-                # proses sisa data dalam batch
-                if batch:
-                    publised = self.prosess_batch(batch, channel, db)
-                    total_published += publised
-                    last_processed_id = batch[-1]["_id"]
-                    self.save_checkpoint(db, last_processed_id, total_published)
-                    self.logger.info(f"Published {publised} messages | Total: {total_published}")
+                        self.logger.info(f"Published {publised} messages | Total: {total_published}")
+                
+                except Exception as e:
+                    self.logger.error(f"Error during cursor iteration: {e}")
+                    import traceback
+                    self.logger.error(traceback.format_exc())
+                    if batch:
+                        self.logger.info(f"Processing {len(batch)} remaining items before retry...")
+                finally:
+                    try:
+                        cursor.close()
+                    except:
+                        pass  # Cursor already closed or not available
                 
                 # jika tidak dalam mode watch, hentikan proses setelah satu putaran
                 if not watch_mode:
@@ -142,6 +135,7 @@ class modelProducer:
                     break
                 else:
                     time.sleep(10)
+            
             self.cleanup()    
             connection.close()
             client.close()
@@ -200,7 +194,6 @@ class modelProducer:
             
     # fungsi proses batch data
     def prosess_batch(self, batch, channel, db):
-        """Process batch dengan connection error handling"""
         if not batch:
             return 0
 

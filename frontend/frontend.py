@@ -105,11 +105,14 @@ def load_metrics():
     }
 
 
-def load_cluster_data(limit=10000):
+def load_cluster_data(limit=None):
     """Load data hasil clustering dari database"""
     try:
         db = get_database()
-        docs = list(db.clusters.find().sort("timestamp", -1).limit(limit))
+        cursor = db.clusters.find().sort("timestamp", -1)
+        if limit is not None and isinstance(limit, int) and limit > 0:
+            cursor = cursor.limit(limit)
+        docs = list(cursor)
         
         if not docs:
             return None
@@ -808,7 +811,7 @@ def render_cluster_analysis(df_pca, interpretations, settings):
 def render_business_insights(interpretations):
     """Render interpretasi bisnis"""
     st.subheader("Analisis Segmen Bisnis")
-    st.text('catatan: Interpretasi ini adalah Karakteristik Dominan dari cluster, bukan segmentasi eksklusif.')
+    st.text('catatan: interpretasi ini adalah Karakteristik Dominan dari cluster tersebut, bukan segmentasi eksklusif.')
     
     # Sort by priority
     priority_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
@@ -951,6 +954,23 @@ def main():
         st.warning("Sistem belum aktif. Menunggu data...")
         return
     
+    # Load cluster data early to get authoritative cluster count
+    with st.spinner("Memuat data cluster untuk status panel..."):
+        total_data_db = int(metrics.get('total_data', 0) or 0)
+        # Load up to total_data or 500k whichever is smaller
+        limit_to_load = min(total_data_db, 500000) if total_data_db > 0 else 50000
+        df_status = load_cluster_data(limit=limit_to_load)
+    
+    # Update metrics active_clusters to match actual loaded data
+    if df_status is not None and not df_status.empty:
+        # Normalize cluster_id if stored as list
+        if isinstance(df_status.loc[0, 'cluster_id'], list):
+            df_status['cluster_id'] = df_status['cluster_id'].apply(
+                lambda x: x[0] if isinstance(x, list) and len(x) > 0 else x
+            )
+        actual_clusters = len(df_status['cluster_id'].unique())
+        metrics['active_clusters'] = actual_clusters  # Override with authoritative count
+    
     # Status section
     latency = calculate_latency()
     render_status_section(metrics, latency)
@@ -967,7 +987,8 @@ def main():
     
     with tab1:
             with st.spinner("Memuat data cluster..."):
-                df = load_cluster_data(50000) 
+                # Reuse df_status for visualization, or reload with user's max_points preference
+                df = df_status if df_status is not None else load_cluster_data(50000) 
             
             if df is not None and not df.empty:
                 # Handle list cluster_id

@@ -48,15 +48,15 @@ class ModelConsumer:
         state = self.db_manager.restore_consumer_state()
         
         if state:
-            self.counter = state.get("processed_count", 0)
+            self.counter = state.get("processed_count", 0) #jumlah data yang sudah diproses sebelumnya
             
             # Restore model
             model = self.db_manager.restore_model_snapshot()
             if model:
                 self.model = model
-                logger.info(" Full model state restored from snapshot")
+                logger.info("model snapshot ditemukan dan dimuat")
             else:
-                logger.warning(" No model snapshot, initializing fresh")
+                logger.warning(" model snapshot tidak ditemukan, inisialisasi model baru")
                 self.load_or_initialize_model()
             
             # Restore buffer
@@ -77,12 +77,15 @@ class ModelConsumer:
         # Save consumer state
         model_params = {
             "clustering_threshold": self.model.clustering_threshold,
-            "fading_factor": self.model.fading_factor
+            "fading_factor": self.model.fading_factor,
+            "intersection_factor": self.model.intersection_factor,
+            "minimum_weight": self.model.minimum_weight
         }
+
         self.db_manager.save_consumer_state(
-            self.counter, 
-            len(self.data_buffer), 
-            model_params
+            self.counter, # sudah berapa data yang diproses
+            len(self.data_buffer), # jumlah antrean data yang ada di memory saat ini
+            model_params # parameter model saat ini
         )
     
     def load_or_initialize_model(self):
@@ -100,27 +103,22 @@ class ModelConsumer:
     # proses data point OML  
     def process_datapoint(self, message):
         try:
-            original_id = message.get('metadata', {}).get('original_id')
+            original_id = message.get('metadata', {}).get('original_id') # ID unik dari metadata, untuk cek duplikat
 
-            if original_id and self.db_manager.is_data_processed(original_id):
+            if original_id and self.db_manager.is_data_processed(original_id): # jika original_id ada dan sudah diproses maka skip
                 logger.debug(f"Skipping duplicate: {original_id}")
                 return
             
             # Extract features
-            features = message['features']
-            x = {f'x{i}': val for i, val in enumerate(features)}
+            features = message['features'] # ambil fitur dari message ubah menjadi dictionary
+            x = {f'x{i}': val for i, val in enumerate(features)} # variabel ini adalah dictionary fitur dengan key x0, x1, x2,...
 
             # Learn & predict
             self.model.learn_one(x)
             cluster_id = self.model.predict_one(x)
-
-            # if cluster_id is None:
-            #     cluster_id = 0
-            #     logger.warning("Cluster ID was None, assigned to 0")
     
-            # Add to buffer
-            true_label = message.get("label", None)
-            self.data_buffer.append((features, cluster_id, true_label))
+            # simpan hanya features dan cluster_id 
+            self.data_buffer.append((features, cluster_id))
             self.counter += 1
 
             # Save to database
@@ -131,9 +129,8 @@ class ModelConsumer:
                 "features": features,
                 "raw_data": raw_data,
                 "cluster_id": int(cluster_id),
-                "true_label": true_label,
                 "timestamp": datetime.utcnow(),
-                "user_id": metadata.get('user_id'),  # User ID dari metadata (tidak digunakan untuk OML)
+                "user_id": metadata.get('user_id'),  # User ID dari metadata (untuk DB/FE)
                 "Item ID": metadata.get('Item ID'),
                 "Category ID": metadata.get('Category ID'),
                 "Behavior type": metadata.get('behavior_type'),
@@ -143,7 +140,7 @@ class ModelConsumer:
             
             self.db_manager.save_cluster_data(cluster_data)
 
-            # Periodic operations (every 100 messages)
+            # Periodic penjelajahan evaluasi, merge
             if self.counter % 100 == 0:
                 self._periodic_operations()
 
@@ -154,7 +151,7 @@ class ModelConsumer:
     
     def _periodic_operations(self):
         """Operasi periodik: evaluate, merge, track, save"""
-        # 1. Evaluate Sebelum merge (memory only)
+  
         self.evaluator.pre_merge_metrics = self.evaluator.evaluate_internal_metrics(
             self.data_buffer, 
             self.counter, 
@@ -163,10 +160,8 @@ class ModelConsumer:
             label_suffix="pre_merge"
         )
         
-        # 2. Merge clusters
         merge_happened = self.merge_similar_clusters()
         
-        # 3. Evaluate SETELAH merge (save to DB)
         if merge_happened:
             self.evaluator.evaluate_internal_metrics(
                 self.data_buffer,
@@ -176,7 +171,6 @@ class ModelConsumer:
                 label_suffix="post_merge"
             )
         else:
-            # No merge, save pre-merge metrics
             if self.evaluator.pre_merge_metrics:
                 self.db_manager.db.metrics.replace_one(
                     {"_id": "latest"},
@@ -191,17 +185,14 @@ class ModelConsumer:
                 }
                 self.db_manager.db.metrics_archive.insert_one(archive_doc)
         
-        # 4. Track storage
         self.storage_tracker.track_storage_footprint(
             self.model, 
             self.data_buffer, 
             self.counter
         )
         
-        # 5. Save full state
         self.save_full_state()
         
-        # Clear temporary metrics
         self.evaluator.pre_merge_metrics = None
         
         logger.info(f"Checkpoint saved at {self.counter} messages")
@@ -217,8 +208,8 @@ class ModelConsumer:
             return False
 
         try:
-            features = np.array([f[:3] for f, _, _ in self.data_buffer])
-            labels = np.array([cid for _, cid, _ in self.data_buffer])
+            features = np.array([f[:3] for f, cid in self.data_buffer])
+            labels = np.array([cid for f, cid in self.data_buffer])
             unique_clusters = np.unique(labels)
             
             if len(unique_clusters) < 2:
@@ -260,9 +251,9 @@ class ModelConsumer:
 
             # Update buffer
             new_buffer = deque(maxlen=self.data_buffer.maxlen)
-            for f, cid, lbl in self.data_buffer:
+            for f, cid in self.data_buffer:
                 new_cid = merged_map.get(int(cid), int(cid))
-                new_buffer.append((f, new_cid, lbl))
+                new_buffer.append((f, new_cid))
             self.data_buffer = new_buffer
 
             # Update database

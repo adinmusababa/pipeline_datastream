@@ -82,10 +82,10 @@ class modelConsumer:
                              .limit(self.data_buffer.maxlen))
             
             for doc in reversed(recent_docs):
+                # Restore buffer as (features, cluster_id) — ignore true_label to save memory
                 self.data_buffer.append((
                     doc['features'],
-                    doc['cluster_id'],
-                    doc.get('true_label')
+                    doc['cluster_id']
                 ))
             
             logging.info(f"Restored: {self.counter} processed, {len(self.data_buffer)} in buffer")
@@ -224,8 +224,8 @@ class modelConsumer:
                 cluster_id = 0
                 logging.warning("luster ID was None, assigned to 0")
 
-            true_label = message.get("label", None)
-            self.data_buffer.append((features, cluster_id, true_label))
+            # Do not store true labels; keep buffer minimal
+            self.data_buffer.append((features, cluster_id))
             self.counter += 1
 
             # Save to MongoDB
@@ -236,7 +236,6 @@ class modelConsumer:
                 "features": features,
                 "raw_data": raw_data,
                 "cluster_id": int(cluster_id),
-                "true_label": true_label,
                 "timestamp": datetime.utcnow(),
                 "User ID": metadata.get('User ID'),
                 "Item ID": metadata.get('Item ID'),
@@ -309,8 +308,8 @@ class modelConsumer:
             return None
 
         try:
-            features = np.array([f[:3] for f, _, _ in self.data_buffer])
-            labels = np.array([cid for _, cid, _ in self.data_buffer])
+            features = np.array([f[:3] for f, cid in self.data_buffer])
+            labels = np.array([cid for f, cid in self.data_buffer])
             unique_clusters = np.unique(labels)
 
             if len(unique_clusters) < 2:
@@ -322,17 +321,11 @@ class modelConsumer:
             except:
                 silhouette, db_index = -1, -1
 
-            dunn = self.compute_dunn_index(features, labels)
-            intra, inter = self.compute_cluster_distances(features, labels)
-
             metrics_data = {
                 "total_data": self.counter,
-                "active_clusters": len(unique_clusters),
+                "active_clusters": int(len(unique_clusters)),
                 "silhouette": float(silhouette),
                 "davies_bouldin": float(db_index),
-                "dunn_index": float(dunn),
-                "intra_distance": float(intra),
-                "inter_distance": float(inter),
                 "timestamp": datetime.utcnow()
             }
 
@@ -375,8 +368,8 @@ class modelConsumer:
             return False
 
         try:
-            features = np.array([f[:3] for f, _, _ in self.data_buffer])
-            labels = np.array([cid for _, cid, _ in self.data_buffer])
+            features = np.array([f[:3] for f, cid in self.data_buffer])
+            labels = np.array([cid for f, cid in self.data_buffer])
             unique_clusters = np.unique(labels)
             
             if len(unique_clusters) < 2:
@@ -415,9 +408,9 @@ class modelConsumer:
  
             # Update buffer
             new_buffer = deque(maxlen=self.data_buffer.maxlen)
-            for f, cid, lbl in self.data_buffer:
+            for f, cid in self.data_buffer:
                 new_cid = merged_map.get(int(cid), int(cid))
-                new_buffer.append((f, new_cid, lbl))
+                new_buffer.append((f, new_cid))
             self.data_buffer = new_buffer
 
             # Update database

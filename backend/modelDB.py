@@ -134,10 +134,10 @@ class DatabaseManager:
             
             buffer_data = []
             for doc in reversed(recent_docs):
+                # Restore buffer as (features, cluster_id) — no true labels
                 buffer_data.append((
                     doc['features'],
-                    doc['cluster_id'],
-                    doc.get('true_label')
+                    doc['cluster_id']
                 ))
             
             logger.info(f"Buffer restored: {len(buffer_data)} items")

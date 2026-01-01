@@ -39,14 +39,14 @@ class StreamPreprocessor:
             behavior = raw_data['Behavior type']
             timestamp = raw_data['Timestamp']
             
-            # 1. Encode behavior (ordinal)
+            # Encode behavior (ordinal)
             behavior_encoded = self.behavior_mapping.get(behavior, 0)
 
-            # 2. Scale Item ID
+            # Scale Item ID
             self.item_scaler.learn_one({'item': float(item_id)})  # Learn dulu
             item_scaled = self.item_scaler.transform_one({'item': float(item_id)})['item']  # Baru transform
             
-            # 3. Scale Category ID
+            # Scale Category ID
             self.category_scaler.learn_one({'category': float(category_id)})
             category_scaled = self.category_scaler.transform_one({'category': float(category_id)})['category']
             
@@ -54,7 +54,7 @@ class StreamPreprocessor:
             self.timestamp_scaler.learn_one({'timestamp': float(timestamp)})
             timestamp_scaled = self.timestamp_scaler.transform_one({'timestamp': float(timestamp)})['timestamp']
             
-            # 5. Compile features
+            # Compile features
             features = [
                 float(item_scaled),
                 float(category_scaled),
@@ -100,13 +100,17 @@ class StreamPreprocessor:
             return [0.0, 0.0, 0.0, 0.0]
     
     def get_state(self):
-        return {
-            'n_samples_seen': self.n_samples_seen,
-            'item_scaler_mean': getattr(self.item_scaler, 'mean', {}).get('item', 0),
-            'category_scaler_mean': getattr(self.category_scaler, 'mean', {}).get('category', 0),
-            'timestamp_scaler_min': getattr(self.timestamp_scaler, 'min', {}).get('timestamp', 0),
-            'timestamp_scaler_max': getattr(self.timestamp_scaler, 'max', {}).get('timestamp', 1),
-        }
+        try:
+            return {
+                'n_samples_seen': int(self.n_samples_seen),
+                'item_scaler_mean': float(getattr(self.item_scaler, 'mean', {}).get('item', 0) or 0),
+                'category_scaler_mean': float(getattr(self.category_scaler, 'mean', {}).get('category', 0) or 0),
+                'timestamp_scaler_min': float(getattr(self.timestamp_scaler, 'min', {}).get('timestamp', 0) or 0),
+                'timestamp_scaler_max': float(getattr(self.timestamp_scaler, 'max', {}).get('timestamp', 1) or 1),
+            }
+        except Exception as e:
+            logging.warning(f"Failed to extract state: {e}")
+            return {'n_samples_seen': int(self.n_samples_seen)}
     
     def save(self, path="models/preprocessor.pkl"):
 
@@ -148,53 +152,5 @@ class StreamPreprocessor:
             logging.error(f"Failed to load preprocessor: {e}")
             return StreamPreprocessor()
 
-
-# ===== UTILITY FUNCTIONS =====
-
 def create_or_load_preprocessor(path="models/preprocessor.pkl"):
     return StreamPreprocessor.load(path)
-
-
-# # ===== TESTING =====
-# if __name__ == "__main__":
-#     # Test preprocessor
-#     print("="*60)
-#     print("TESTING STREAM PREPROCESSOR")
-#     print("="*60)
-    
-#     preprocessor = StreamPreprocessor()
-    
-#     # Test data
-#     test_data = [
-#         {'User ID': 100, 'Item ID': 5001, 'Category ID': 10, 'Behavior type': 'pv', 'Timestamp': 1000},
-#         {'User ID': 101, 'Item ID': 5002, 'Category ID': 10, 'Behavior type': 'fav', 'Timestamp': 1100},
-#         {'User ID': 102, 'Item ID': 5003, 'Category ID': 11, 'Behavior type': 'cart', 'Timestamp': 1200},
-#         {'User ID': 103, 'Item ID': 5004, 'Category ID': 12, 'Behavior type': 'buy', 'Timestamp': 1300},
-#     ]
-    
-#     print("\Processing test data:")
-#     for i, data in enumerate(test_data):
-#         features = preprocessor.fit_transform_one(data)
-#         print(f"\nData {i+1}:")
-#         print(f"  Raw: {data}")
-#         print(f"  Features: {features}")
-    
-#     print("\nPreprocessor state:")
-#     print(json.dumps(preprocessor.get_state(), indent=2))
-    
-#     # Test save/load
-#     print("\Testing save/load...")
-#     preprocessor.save("test_preprocessor.pkl")
-    
-#     loaded = StreamPreprocessor.load("test_preprocessor.pkl")
-#     print(f"Loaded preprocessor with {loaded.n_samples_seen} samples seen")
-    
-#     # Test transform only (no learning)
-#     print("\Testing transform_one (no learning):")
-#     new_data = {'User ID': 104, 'Item ID': 5005, 'Category ID': 13, 'Behavior type': 'buy', 'Timestamp': 1400}
-#     features = loaded.transform_one(new_data)
-#     print(f"  Features: {features}")
-    
-#     print("\n" + "="*60)
-#     print("TEST COMPLETE")
-#     print("="*60)

@@ -18,18 +18,18 @@ class ClusterEvaluator:
         self.pre_merge_metrics = None
         logger.info(" ClusterEvaluator initialized")
     
-    def evaluate_internal_metrics(self, data_buffer, counter, model, 
+    def evaluate_internal_metrics(self, data_buffer, counter, model,
                                   save_to_db=True, label_suffix=""):
         """
-        Evaluasi metrik internal clustering
-        
+        Evaluasi metrik internal clustering — hanya Silhouette dan Davies-Bouldin
+
         Args:
-            data_buffer: deque of (features, cluster_id, true_label)
+            data_buffer: deque of (features, cluster_id) or (features, cluster_id, ...)
             counter: jumlah data yang telah diproses
             model: DBSTREAM model instance
             save_to_db: simpan ke database atau tidak
             label_suffix: label untuk stage (pre_merge/post_merge)
-        
+
         Returns:
             dict: metrics data atau None
         """
@@ -37,16 +37,16 @@ class ClusterEvaluator:
             return None
 
         try:
-            # Extract features dan labels dari buffer
-            features = np.array([f[:3] for f, _, _ in data_buffer])
-            labels = np.array([cid for _, cid, _ in data_buffer])
+            # Extract features and labels robustly (support both 2- or 3-tuple buffer items)
+            features = np.array([item[0][:3] for item in data_buffer])
+            labels = np.array([item[1] for item in data_buffer])
             unique_clusters = np.unique(labels)
 
             if len(unique_clusters) < 2:
                 logger.warning("  Less than 2 clusters, skipping evaluation")
                 return None
 
-            # Compute metrics
+            # Compute Silhouette and Davies-Bouldin
             try:
                 silhouette = silhouette_score(features, labels)
                 db_index = davies_bouldin_score(features, labels)
@@ -54,27 +54,20 @@ class ClusterEvaluator:
                 logger.warning(f"  Silhouette/DBI computation failed: {e}")
                 silhouette, db_index = -1, -1
 
-            dunn = self.compute_dunn_index(features, labels)
-            intra, inter = self.compute_cluster_distances(features, labels)
-
-            # Build metrics data
+            # Build metrics data (minimal to save resources)
             metrics_data = {
                 "total_data": counter,
-                "active_clusters": len(unique_clusters),
+                "active_clusters": int(len(unique_clusters)),
                 "silhouette": float(silhouette),
                 "davies_bouldin": float(db_index),
-                "dunn_index": float(dunn),
-                "intra_distance": float(intra),
-                "inter_distance": float(inter),
                 "timestamp": datetime.utcnow()
             }
 
             # Save to database jika diminta
             if save_to_db:
                 self._save_metrics_to_db(metrics_data, model, label_suffix)
-                logger.info(f"Metrics | Silhouette: {silhouette:.3f} | "
-                          f"DBI: {db_index:.3f} | Clusters: {len(unique_clusters)}")
-            
+                logger.info(f"Metrics | Silhouette: {silhouette:.3f} | DBI: {db_index:.3f} | Clusters: {len(unique_clusters)}")
+
             return metrics_data
 
         except Exception as e:
