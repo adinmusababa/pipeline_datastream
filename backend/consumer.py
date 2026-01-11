@@ -21,11 +21,7 @@ logger = get_logger(__name__)
 
 
 class ModelConsumer:
-    """
-    Main consumer class untuk online clustering
-    Modular design dengan separation of concerns
-    """
-    
+
     def __init__(self, queue='data_stream', host='localhost', buffer_size=1000):
         self.queue = queue
         self.host = host
@@ -96,18 +92,16 @@ class ModelConsumer:
         self.model = cluster.DBSTREAM(
             clustering_threshold=params["clustering_threshold"],
             fading_factor=params["fading_factor"],
-            cleanup_interval=50,
-            intersection_factor=0.3,
-            minimum_weight=1.0
+            # cleanup_interval=50,
+            intersection_factor=0.5,
+            minimum_weight=2.0
         )
 
-    
+    # proses data point OML  
     def process_datapoint(self, message):
-        """Process satu data point dari queue"""
         try:
             original_id = message.get('metadata', {}).get('original_id')
 
-            # Skip duplicates (idempotency)
             if original_id and self.db_manager.is_data_processed(original_id):
                 logger.debug(f"Skipping duplicate: {original_id}")
                 return
@@ -120,10 +114,10 @@ class ModelConsumer:
             self.model.learn_one(x)
             cluster_id = self.model.predict_one(x)
 
-            if cluster_id is None:
-                cluster_id = 0
-                logger.warning("Cluster ID was None, assigned to 0")
-
+            # if cluster_id is None:
+            #     cluster_id = 0
+            #     logger.warning("Cluster ID was None, assigned to 0")
+    
             # Add to buffer
             true_label = message.get("label", None)
             self.data_buffer.append((features, cluster_id, true_label))
@@ -139,7 +133,7 @@ class ModelConsumer:
                 "cluster_id": int(cluster_id),
                 "true_label": true_label,
                 "timestamp": datetime.utcnow(),
-                "User ID": metadata.get('User ID'),
+                "user_id": metadata.get('user_id'),  # User ID dari metadata (tidak digunakan untuk OML)
                 "Item ID": metadata.get('Item ID'),
                 "Category ID": metadata.get('Category ID'),
                 "Behavior type": metadata.get('behavior_type'),
@@ -160,7 +154,7 @@ class ModelConsumer:
     
     def _periodic_operations(self):
         """Operasi periodik: evaluate, merge, track, save"""
-        # 1. Evaluate SEBELUM merge (memory only)
+        # 1. Evaluate Sebelum merge (memory only)
         self.evaluator.pre_merge_metrics = self.evaluator.evaluate_internal_metrics(
             self.data_buffer, 
             self.counter, 
