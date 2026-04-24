@@ -12,9 +12,6 @@ logger = logging.getLogger(__name__)
 
 
 class ClusterEvaluator:
-    """
-    Evaluasi kualitas clustering dengan berbagai metrik
-    """
     
     def __init__(self, db_manager):
         self.db = db_manager
